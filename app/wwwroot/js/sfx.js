@@ -80,9 +80,15 @@ window.sfx = (function () {
             tone(c, 1046.5, 0.32, 0.45, "triangle", 0.2);
             tone(c, 1318.51, 0.32, 0.45, "triangle", 0.14);
         },
+        // Failing a whole quiz stage — symmetric effort to quizPass (a full
+        // set finishing either way is a bigger moment than one card), but a
+        // soft descending run rather than a punishing buzz: "not quite yet,"
+        // not "wrong."
         quizFail: (c) => {
-            tone(c, 293.66, 0, 0.12, "sine", 0.14);
-            tone(c, 246.94, 0.1, 0.22, "sine", 0.14);
+            tone(c, 392, 0, 0.12, "sine", 0.13);
+            tone(c, 349.23, 0.1, 0.12, "sine", 0.13);
+            tone(c, 293.66, 0.2, 0.16, "sine", 0.13);
+            tone(c, 246.94, 0.32, 0.4, "sine", 0.13);
         },
         // Finishing a WHOLE flashcard deck (the last "Got it!") — like
         // quizPass, this is a whole set finished, not just one card, so it

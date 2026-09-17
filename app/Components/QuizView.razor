@@ -100,6 +100,14 @@
     [Parameter] public EventCallback OnPassed { get; set; }
     [Parameter] public EventCallback<(int Correct, int Total)> OnFailed { get; set; }
 
+    // Fired the instant the "Quiz passed!" results screen appears — separate
+    // from OnPassed, which only fires later when the player taps "Continue →"
+    // (that one drives the actual game-state advance/achievement check in
+    // Home.razor). This is what lets the results screen itself carry the big
+    // sound/visual celebration, instead of it only landing after the player
+    // has already moved on and the screen is gone.
+    [Parameter] public EventCallback OnStagePassed { get; set; }
+
     private List<QuizCard> _order = [];
     private List<int> _optionOrder = [];
     private int _index;
@@ -192,8 +200,14 @@
         if (Finished)
         {
             var passed = _correctCount >= _order.Count * QuizStage.PassThreshold;
-            if (!passed)
+            if (passed)
             {
+                await Game.PlaySoundAsync(SoundEffect.QuizPass);
+                await OnStagePassed.InvokeAsync();
+            }
+            else
+            {
+                await Game.PlaySoundAsync(SoundEffect.QuizFail);
                 await OnFailed.InvokeAsync((_correctCount, _order.Count));
             }
             return;

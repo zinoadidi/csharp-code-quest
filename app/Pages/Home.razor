@@ -108,7 +108,7 @@
         <main class="main-area">
             @if (ActiveQuiz is not null)
             {
-                <QuizView Stage="ActiveQuiz" OnPassed="OnQuizPassedAsync" OnFailed="OnQuizFailedAsync" @key="ActiveQuiz" />
+                <QuizView Stage="ActiveQuiz" OnPassed="OnQuizPassedAsync" OnFailed="OnQuizFailedAsync" OnStagePassed="TriggerCelebrationFx" @key="ActiveQuiz" />
             }
             else if (CurrentTask is null)
             {
@@ -705,6 +705,15 @@
     private int _celebrationTriggerCount;
     private string? ActiveCelebrationEffect;
 
+    // Separate from _celebrationTriggerCount (which only counts items
+    // through the achievement/level/quest queue for the "every 5th" gate) —
+    // this uniquely identifies each individual fx showing, since
+    // TriggerCelebrationFx is also called directly (e.g. a quiz stage
+    // passing) outside that queue. Without its own counter, a direct call
+    // and a queue-driven one could share the same token and clear each
+    // other's effect early.
+    private int _celebrationFxToken;
+
     private void EnqueueCelebration(Func<Task> showAsync)
     {
         _celebrationQueue.Enqueue(showAsync);
@@ -736,7 +745,7 @@
     private void TriggerCelebrationFx()
     {
         ActiveCelebrationEffect = CelebrationFxStyles[_celebrationFxRandom.Next(CelebrationFxStyles.Length)];
-        var token = _celebrationTriggerCount;
+        var token = ++_celebrationFxToken;
         StateHasChanged();
         _ = ClearCelebrationFxAsync(token);
     }
@@ -744,7 +753,7 @@
     private async Task ClearCelebrationFxAsync(int token)
     {
         await Task.Delay(2200);
-        if (_celebrationTriggerCount == token)
+        if (_celebrationFxToken == token)
         {
             ActiveCelebrationEffect = null;
             StateHasChanged();
@@ -1038,8 +1047,6 @@
             EnqueueAchievements(newAchievements);
         }
 
-        await Game.PlaySoundAsync(SoundEffect.QuizPass);
-
         ActiveQuiz = null;
         var resume = _afterQuiz;
         _afterQuiz = null;
@@ -1048,7 +1055,6 @@
 
     private async Task OnQuizFailedAsync((int Correct, int Total) result)
     {
-        await Game.PlaySoundAsync(SoundEffect.QuizFail);
 
         if (CurrentLevelId is int levelId && ActiveQuiz is not null)
         {
