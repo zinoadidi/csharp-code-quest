@@ -548,21 +548,26 @@
         if (FlashcardFlipped) return;
         FlashcardFlipped = true;
         _flashcardsSeenInDeck++;
+        _ = Game.PlaySoundAsync(SoundEffect.Navigate);
 
         if (_flashcardsSeenInDeck % FlashcardShakeEveryNth == 0)
         {
-            FlashcardShaking = true;
-            _ = Game.PlaySoundAsync(SoundEffect.FlashcardStreak);
-            _ = ClearFlashcardShakeAsync(++_flashcardShakeToken);
-        }
-        else
-        {
-            _ = Game.PlaySoundAsync(SoundEffect.Navigate);
+            // Waits out the card's own 0.5s flip transition (app.css
+            // .flashcard-inner) before shaking, so the two animations play
+            // one after the other instead of stacking into a single messier
+            // motion — just the shake, no extra sound layered on top.
+            _ = PlayFlashcardShakeAsync(++_flashcardShakeToken);
         }
     }
 
-    private async Task ClearFlashcardShakeAsync(int token)
+    private async Task PlayFlashcardShakeAsync(int token)
     {
+        await Task.Delay(500);
+        if (_flashcardShakeToken != token) return;
+
+        FlashcardShaking = true;
+        StateHasChanged();
+
         await Task.Delay(500);
         if (_flashcardShakeToken == token)
         {
