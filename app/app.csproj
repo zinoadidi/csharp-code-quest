@@ -1,0 +1,143 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+    <!-- GitHub Pages does not serve the Content-Encoding header Blazor's
+         precompressed .br/.gz assets need, so disable precompression. -->
+    <CompressionEnabled>false</CompressionEnabled>
+    <!-- Roslyn scripting needs to build MetadataReference objects from the raw
+         bytes of the BCL assemblies at runtime (see Home.razor). By default
+         .NET 8+ Blazor wraps assemblies in the WebCIL container format, which
+         is not a plain PE image and can't be fed to MetadataReference.CreateFromImage.
+         Keep plain .dll (ECMA-335 PE) assemblies instead. -->
+    <WasmEnableWebcil>false</WasmEnableWebcil>
+    <!-- The IL trimmer only sees what THIS project's own code calls, but the
+         whole point of this app is running arbitrary student C# that can call
+         any BCL method. A trimmed Release publish silently strips overloads
+         (e.g. Console.WriteLine(int)) that our own code never references,
+         causing MissingMethodException at student-code run time even though
+         the app itself builds and boots fine. Disable trimming entirely. -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <!-- Keep static/plain (unhashed) file names for wwwroot static assets so
+         the Roslyn reference loader in Home.razor can fetch the reference
+         assemblies copied in by CopyRoslynReferenceAssemblies below at a
+         known, predictable "roslyn-refs/{AssemblyName}.dll" path. -->
+    <StaticWebAssetFingerprintingEnabled>false</StaticWebAssetFingerprintingEnabled>
+    <!-- PWA: lets a student install the game (Add to Home Screen / desktop app)
+         and keeps it usable offline once cached, so a flaky connection or a
+         closed tab doesn't cost them their session. Generates
+         service-worker-assets.js (a content-hashed manifest of the publish
+         output) that service-worker.published.js reads to cache-and-version
+         everything. See wwwroot/service-worker.published.js for the actual
+         offline-caching behavior and REQUIREMENTS.md's "Local caching" section
+         for why cache-busting on redeploy matters here. -->
+    <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
+  </PropertyGroup>
+
+  <!-- Roslyn scripting (CSharpScript.EvaluateAsync) needs MetadataReferences
+       built from the raw bytes of the BCL assemblies. In-browser, loaded
+       assemblies have no filesystem Assembly.Location, so we can't build
+       references via reflection the normal way — instead Home.razor fetches
+       these bytes over HTTP at run time. The assemblies published into
+       _framework/ are fingerprinted/hashed by the Blazor SDK in a way not
+       easily predicted from outside, so instead we copy known-name copies of
+       just the assemblies we need, straight from the browser-wasm runtime
+       pack, into wwwroot as a plain static asset folder that publishes with
+       predictable, unhashed names (see StaticWebAssetFingerprintingEnabled
+       above). -->
+  <PropertyGroup>
+    <_RoslynRefPackGlob>$(NuGetPackageRoot)microsoft.netcore.app.runtime.mono.browser-wasm/**/runtimes/browser-wasm</_RoslynRefPackGlob>
+  </PropertyGroup>
+
+  <!-- Each Include below must be a literal glob (not an item-transform
+       expression) because MSBuild only expands "**" wildcards when it
+       evaluates an Include attribute directly, not when a value is produced
+       via a batching transform. This lets us find the files without hardcoding
+       the exact installed runtime pack version. -->
+  <ItemGroup>
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/native/System.Private.CoreLib.dll" />
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/lib/net10.0/System.Runtime.dll" />
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/lib/net10.0/System.Console.dll" />
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/lib/net10.0/System.Linq.dll" />
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/lib/net10.0/System.Collections.dll" />
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/lib/net10.0/System.Collections.Concurrent.dll" />
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/lib/net10.0/System.Collections.Immutable.dll" />
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/lib/net10.0/System.ObjectModel.dll" />
+    <RoslynRefAssemblySource Include="$(_RoslynRefPackGlob)/lib/net10.0/netstandard.dll" />
+  </ItemGroup>
+
+  <Target Name="CopyRoslynReferenceAssemblies" BeforeTargets="Build">
+    <MakeDir Directories="$(MSBuildProjectDirectory)/wwwroot/roslyn-refs" Condition="!Exists('$(MSBuildProjectDirectory)/wwwroot/roslyn-refs')" />
+    <Copy SourceFiles="@(RoslynRefAssemblySource)" DestinationFolder="$(MSBuildProjectDirectory)/wwwroot/roslyn-refs/" SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- Visual game tasks (see REQUIREMENTS.md's "Visual game mode") expose a
+       small Canvas API defined in THIS project's own GameApi/ folder — student
+       scripts need a MetadataReference to app.dll itself to call it, which hits
+       the exact same "no predictable filename in _framework/" problem as the
+       BCL references above, just for our own assembly instead of a NuGet one.
+       Solved the same way: copy a plain, unhashed copy from right after our own
+       compile step (reading from the intermediate obj/ output, since that's
+       guaranteed to exist immediately after CoreCompile — the final bin/ copy
+       happens slightly later in the Build pipeline). -->
+  <Target Name="CopyOwnAssemblyForRoslyn" AfterTargets="CoreCompile">
+    <MakeDir Directories="$(MSBuildProjectDirectory)/wwwroot/roslyn-refs" Condition="!Exists('$(MSBuildProjectDirectory)/wwwroot/roslyn-refs')" />
+    <Copy SourceFiles="$(IntermediateOutputPath)$(TargetFileName)" DestinationFolder="$(MSBuildProjectDirectory)/wwwroot/roslyn-refs/" SkipUnchangedFiles="false" />
+  </Target>
+
+  <!-- Level/task content lives in ../content (kept separate from UI code per
+       REQUIREMENTS.md so adding a task doesn't mean touching Razor components),
+       but there's only one deployable app, so it compiles straight into this
+       project rather than needing its own class library project. -->
+  <ItemGroup>
+    <Compile Include="../content/**/*.cs" LinkBase="Content" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.2" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.2" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.11.0" />
+  </ItemGroup>
+
+  <!-- wwwroot/service-worker.js is a no-op (see its own comment) so `dotnet run`/
+       `dotnet watch` always hit the network and reflect live edits. On publish,
+       MSBuild swaps in service-worker.published.js's real cache-first offline
+       logic instead. -->
+  <ItemGroup>
+    <ServiceWorker Include="wwwroot\service-worker.js" PublishedContent="wwwroot\service-worker.published.js" />
+  </ItemGroup>
+
+  <!-- GitHub Pages ignores folders starting with "_" (like _framework) unless
+       Jekyll processing is disabled via a .nojekyll marker file. Drop one into
+       every publish output automatically. -->
+  <Target Name="AddNoJekyllFile" AfterTargets="Publish">
+    <WriteLinesToFile File="$(PublishDir)wwwroot\.nojekyll" Overwrite="true" Lines="" />
+  </Target>
+
+  <!-- On a completely clean checkout (e.g. a fresh CI runner with nothing
+       previously built), wwwroot/roslyn-refs does not exist yet when the SDK's
+       publish pipeline computes its list of files to copy into $(PublishDir) —
+       that list is fixed from the project's static-web-asset item evaluation,
+       which happens before CopyRoslynReferenceAssemblies/CopyOwnAssemblyForRoslyn
+       above ever run. So on a from-scratch build the two targets above still
+       correctly populate the *source* wwwroot/roslyn-refs (fine for local
+       dev, which serves straight from there), but publish output silently
+       ends up missing the folder entirely — a 404 at runtime for every
+       Roslyn reference assembly, only invisible locally because a
+       previously-populated wwwroot/roslyn-refs (from any earlier build) was
+       already on disk before evaluation. Fixed the same way as
+       AddNoJekyllFile above: copy directly into the final $(PublishDir), after
+       Publish has finished, instead of relying on being picked up as a
+       "normal" wwwroot asset. -->
+  <Target Name="CopyRoslynRefsToPublishOutput" AfterTargets="Publish">
+    <ItemGroup>
+      <_PublishedRoslynRefs Include="$(MSBuildProjectDirectory)/wwwroot/roslyn-refs/*.dll" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)wwwroot/roslyn-refs" Condition="!Exists('$(PublishDir)wwwroot/roslyn-refs')" />
+    <Copy SourceFiles="@(_PublishedRoslynRefs)" DestinationFolder="$(PublishDir)wwwroot/roslyn-refs/" SkipUnchangedFiles="false" />
+  </Target>
+
+</Project>

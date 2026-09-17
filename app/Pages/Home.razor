@@ -1,0 +1,1029 @@
+@page "/"
+@using app.Content
+@using app.GameApi
+@using app.Services
+@inject CSharpRunner Runner
+@inject GameStateService Game
+@inject IJSRuntime JS
+@inject HttpClient Http
+@inject NavigationManager Nav
+
+<PageTitle>C# Code Quest</PageTitle>
+
+@if (IsLoaded && string.IsNullOrWhiteSpace(Game.State.Username) && !DemoArmed)
+{
+    <div class="username-overlay">
+        <div class="username-modal panel">
+            <img class="username-badge" src="icons/controller.svg" alt="" />
+            <h2>Welcome, adventurer!</h2>
+            <p>What should we call you?</p>
+            <input class="username-input"
+                   @bind="UsernameDraft" @bind:event="oninput"
+                   @onkeydown="OnUsernameKeyDown"
+                   maxlength="24"
+                   placeholder="Your name" />
+            <div class="username-actions">
+                <button class="btn-primary" disabled="@string.IsNullOrWhiteSpace(UsernameDraft)" @onclick="SubmitUsernameAsync">Start Questing →</button>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="game-shell">
+    <header class="game-header">
+        <div class="game-header-title">
+            <h1><img class="header-badge" src="icons/controller.svg" alt="" /> C# Code Quest</h1>
+            <p>
+                @if (!string.IsNullOrWhiteSpace(Game.State.Username))
+                {
+                    <text>Welcome back, @Game.State.Username! &bull; </text>
+                }
+                Master C# from basics to intermediate level
+            </p>
+        </div>
+        <div class="game-header-stats">
+            <div class="stat">
+                <div class="stat-label">Points</div>
+                <div class="stat-value"><img class="stat-icon" src="icons/gem.svg" alt="" />@Game.State.Points</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Tasks Done</div>
+                <div class="stat-value">@Game.State.Tasks.Values.Count(t => t.Completed)/@TotalTaskCount</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Streak</div>
+                <div class="stat-value">@Game.State.Streak <img class="stat-icon streak-flame" src="icons/flame.svg" alt="" /></div>
+            </div>
+            <button class="btn-secondary sound-toggle" @onclick="Game.ToggleSoundAsync" title="@(Game.State.SoundEnabled ? "Mute sound effects" : "Unmute sound effects")">
+                @(Game.State.SoundEnabled ? "🔊" : "🔇")
+            </button>
+            <button class="btn-secondary theme-toggle" @onclick="Game.CycleThemeAsync" title="@Game.ThemeLabel">
+                @Game.ThemeIcon
+            </button>
+            <a class="btn-secondary stats-link" href="stats" @onclick="() => _ = Game.PlaySoundAsync(SoundEffect.Navigate)">
+                <img class="stat-icon" src="icons/trophy.svg" alt="" /> Stats
+            </a>
+            @if (DemoArmed)
+            {
+                <button class="btn-secondary demo-mode-btn" disabled="@DemoRunning" @onclick="RunDemoAsync">
+                    @(DemoRunning ? "▶ Running demo..." : "▶ Demo Mode")
+                </button>
+            }
+        </div>
+    </header>
+
+    <div class="game-body">
+        <nav class="level-sidebar">
+            <div class="sidebar-title">Levels</div>
+            <div class="level-list">
+                @for (var i = 0; i < Levels.Count; i++)
+                {
+                    var level = Levels[i];
+                    var locked = Game.IsLevelLocked(Levels, i);
+                    var completed = Game.IsLevelComplete(level);
+                    var doneCount = level.Tasks.Count(t => Game.IsTaskCompleted(level.Id, t.Id));
+                    var isActive = CurrentLevelId == level.Id;
+
+                    <button class="level-btn @(isActive ? "active" : "") @(completed ? "completed" : "") @(locked ? "locked" : "")"
+                            style="--i:@i"
+                            disabled="@locked"
+                            @onclick="() => SelectLevel(level.Id)">
+                        <div class="level-btn-title">
+                            @level.Name
+                            @if (completed)
+                            {
+                                <img class="inline-icon" src="icons/check-badge.svg" alt="Completed" />
+                            }
+                            else if (locked)
+                            {
+                                <img class="inline-icon" src="icons/lock.svg" alt="Locked" />
+                            }
+                        </div>
+                        <div class="level-progress">@doneCount/@level.Tasks.Count tasks</div>
+                    </button>
+                }
+            </div>
+        </nav>
+
+        <main class="main-area">
+            @if (ActiveQuiz is not null)
+            {
+                <QuizView Stage="ActiveQuiz" OnPassed="OnQuizPassedAsync" OnFailed="OnQuizFailedAsync" @key="ActiveQuiz" />
+            }
+            else if (CurrentTask is null)
+            {
+                <div class="welcome-panel">
+                    @if (NextLevelToPlay is { } nextLevel)
+                    {
+                        var doneCount = nextLevel.Tasks.Count(t => Game.IsTaskCompleted(nextLevel.Id, t.Id));
+                        var started = doneCount > 0;
+                        <button class="welcome-cta" @onclick="() => SelectLevel(nextLevel.Id)">
+                            <div class="welcome-cta-label">@(started ? "Continue where you left off" : "Ready to begin?")</div>
+                            <div class="welcome-cta-title">@nextLevel.Name</div>
+                            <div class="welcome-cta-progress">
+                                <div class="welcome-cta-bar">
+                                    <div class="welcome-cta-fill" style="width:@(doneCount * 100 / Math.Max(nextLevel.Tasks.Count, 1))%"></div>
+                                </div>
+                                <span>@doneCount/@nextLevel.Tasks.Count tasks</span>
+                            </div>
+                            <div class="btn-primary welcome-cta-btn">@(started ? "Continue →" : "Start Level →")</div>
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="welcome-cta welcome-cta-done">
+                            <div class="welcome-cta-label">Every level complete</div>
+                            <div class="welcome-cta-title">🎓 You're a C# Master!</div>
+                            <a class="btn-primary welcome-cta-btn" href="certificate">View Your Certificate →</a>
+                        </div>
+                    }
+
+                    <div class="welcome-stats">
+                        <div class="welcome-stat">
+                            <div class="welcome-stat-value">@UnlockedAchievementCount/@Achievements.All.Count</div>
+                            <div class="welcome-stat-label">🏆 Achievements</div>
+                        </div>
+                        <div class="welcome-stat">
+                            <div class="welcome-stat-value">@Levels.Count(Game.IsLevelComplete)/@Levels.Count</div>
+                            <div class="welcome-stat-label">🗺️ Levels Done</div>
+                        </div>
+                        <div class="welcome-stat">
+                            <div class="welcome-stat-value">@Game.State.CurrentDayStreak</div>
+                            <div class="welcome-stat-label">📅 Day Streak</div>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (CurrentTask.Kind == TaskKind.Flashcard)
+            {
+                var task = CurrentTask;
+                var cards = task.Flashcards!;
+                var card = cards[FlashcardIndex];
+                var isLastCard = FlashcardIndex == cards.Count - 1;
+                <div class="flashcard-page" @key="task.Id">
+                    <div class="task-meta flashcard-meta">
+                        <span>Level @CurrentLevelId &bull; Quick Concepts (@(FlashcardIndex + 1)/@cards.Count)</span>
+                        <span class="task-points"><img class="inline-icon" src="icons/gem.svg" alt="" /> +@task.Points points</span>
+                    </div>
+                    <div class="flashcard @(FlashcardFlipped ? "flipped" : "")" @onclick="FlipFlashcard" @key="FlashcardIndex">
+                        <div class="flashcard-inner">
+                            <div class="flashcard-face flashcard-front">
+                                <div class="flashcard-icon">💡</div>
+                                <div class="flashcard-term">@card.Term</div>
+                                <div class="flashcard-tap-hint">Tap to reveal</div>
+                            </div>
+                            <div class="flashcard-face flashcard-back">
+                                <div class="flashcard-term flashcard-term-small">@card.Term</div>
+                                <div class="flashcard-definition">@card.Definition</div>
+                            </div>
+                        </div>
+                    </div>
+                    @if (FlashcardFlipped)
+                    {
+                        <div class="controls flashcard-controls">
+                            @if (isLastCard)
+                            {
+                                <button class="btn-primary" @onclick="CompleteFlashcardAsync">Got it! Continue →</button>
+                            }
+                            else
+                            {
+                                <button class="btn-primary" @onclick="NextFlashcard">Next →</button>
+                            }
+                        </div>
+                    }
+                    <div class="task-navigation">
+                        <button class="btn-secondary" @onclick="() => CurrentLevelId = null">← Back to Levels</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                var task = CurrentTask;
+                <div class="task-content diff-@task.Difficulty.ToString().ToLowerInvariant()" @key="task.Id">
+                    <div class="task-header">
+                        <h2 class="task-title">@task.Title</h2>
+                        <div class="task-meta">
+                            <span>Level @CurrentLevelId &bull; Task @CurrentTaskId</span>
+                            <span class="task-difficulty-badge">Difficulty: @task.Difficulty</span>
+                            <span class="task-points"><img class="inline-icon" src="icons/gem.svg" alt="" /> +@task.Points points</span>
+                        </div>
+                    </div>
+
+                    @if (LastPassed == true)
+                    {
+                        <div class="success-message">
+                            ✓ Excellent! You @(LastPointsAwarded > 0 ? $"earned {LastPointsAwarded} points!" : "solved it again!")
+                        </div>
+                    }
+
+                    <div class="task-description">@task.Description</div>
+
+                    @if (RevealedHints.Count > 0)
+                    {
+                        <div class="hint-box" @key="RevealedHints.Count">
+                            <div class="hint-title"><img class="inline-icon" src="icons/bulb.svg" alt="" /> Hints</div>
+                            @for (var i = 0; i < RevealedHints.Count; i++)
+                            {
+                                var hint = RevealedHints[i];
+                                if (hint.IsSolution)
+                                {
+                                    <div class="hint-solution">
+                                        <div class="hint-solution-label">Full solution — try typing it out yourself to help it stick:</div>
+                                        <pre class="hint-solution-code" @onclick="() => CopySolutionAsync(task.Id, hint.Text)" @oncopy="() => OnSolutionCopiedAsync(task.Id)">@hint.Text</pre>
+                                        @if (_copiedTaskId == task.Id)
+                                        {
+                                            <div class="copied-toast">Copied!</div>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="hint-content">@hint.Text</div>
+                                }
+                            }
+                        </div>
+                    }
+
+                    <div class="code-section">
+                        <div class="code-panel">
+                            <div class="panel-label">Your C# Code</div>
+                            <CodeEditor @bind-Value="EditorCode" />
+                        </div>
+                        <div class="code-panel">
+                            <div class="panel-label">Output</div>
+                            <pre class="output-display @(LastPassed == true ? "success" : LastPassed == false ? "error" : "")">@(LastOutput ?? "Output will appear here...")</pre>
+                        </div>
+                    </div>
+
+                    @if (LastCanvasCommands.Count > 0)
+                    {
+                        <div class="canvas-section">
+                            <div class="panel-label">Visual Result</div>
+                            <CanvasView Commands="LastCanvasCommands" ReplayToken="CanvasReplayToken" />
+                            @if (LastPassed == true)
+                            {
+                                <button class="btn-secondary btn-small canvas-play-btn" @onclick="PlayVisualResultAsync">▶ Play Again</button>
+                            }
+                        </div>
+                    }
+
+                    <div class="controls">
+                        <button class="btn-primary" disabled="@IsRunning" @onclick="RunAsync">@(IsRunning ? "Running..." : "▶ Run Code")</button>
+                        <button class="btn-secondary" @onclick="ResetCode">↻ Reset</button>
+                        @if (RevealedHints.Count < task.Hints.Count)
+                        {
+                            var solutionLocked = Game.IsNextHintLockedSolution(CurrentLevelId!.Value, task);
+                            if (solutionLocked)
+                            {
+                                var attemptsLeft = GameStateService.SolutionUnlockAttempts - Game.FailedAttemptsFor(CurrentLevelId.Value, task.Id);
+                                <button class="btn-hint btn-hint-locked" disabled>
+                                    🔒 Solution unlocks after @attemptsLeft more @(attemptsLeft == 1 ? "try" : "tries")
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn-hint" @onclick="RevealNextHintAsync">💡 @(RevealedHints.Count == 0 ? "Show Hint" : "Next Hint")</button>
+                            }
+                        }
+                        @if (LastPassed == true)
+                        {
+                            <button class="btn-next" @onclick="NextTask">Next Task →</button>
+                        }
+                    </div>
+
+                    <div class="task-navigation">
+                        @if (CurrentTaskId > 1)
+                        {
+                            <button class="btn-secondary" @onclick="PrevTask">← Previous</button>
+                        }
+                        <button class="btn-secondary" @onclick="() => CurrentLevelId = null">← Back to Levels</button>
+                    </div>
+                </div>
+            }
+        </main>
+    </div>
+
+    @if (ShowQuestCompletePopup)
+    {
+        <div class="celebration-overlay">
+            <div class="celebration-popup quest-complete-popup">
+                <img class="celebration-icon" src="icons/trophy.svg" alt="" />
+                <div class="celebration-title">Quest Complete!</div>
+                <div class="celebration-subtitle">You finished every level — you're a C# Master.</div>
+                <a class="btn-primary quest-complete-cta" href="certificate">🎓 View Your Certificate</a>
+            </div>
+        </div>
+    }
+    else if (LevelCompletePopupLevel is not null)
+    {
+        <div class="celebration-overlay" @key="LevelCompletePopupLevel">
+            <div class="celebration-popup level-complete-popup">
+                <img class="celebration-icon" src="icons/trophy.svg" alt="" />
+                <div class="celebration-title">Level Complete!</div>
+                <div class="celebration-subtitle">@LevelCompletePopupLevel.Name</div>
+            </div>
+        </div>
+    }
+
+    <div class="achievement-stack">
+        @foreach (var achievement in VisibleAchievements)
+        {
+            <div class="celebration-popup achievement-popup" @key="achievement">
+                <div class="achievement-icon">@achievement.Icon</div>
+                <div class="achievement-text">@achievement.Title</div>
+                <div class="achievement-desc">@achievement.Description</div>
+            </div>
+        }
+    </div>
+
+    @if (ActiveCelebrationEffect is not null)
+    {
+        <div class="celebration-fx celebration-fx-@ActiveCelebrationEffect" @key="_celebrationTriggerCount">
+            @for (var i = 0; i < CelebrationFxPieceCount; i++)
+            {
+                <span class="fx-piece" style="--i:@i"></span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<Level> Levels => AllLevels.Levels;
+    private int TotalTaskCount => Levels.Sum(l => l.Tasks.Count);
+
+    // Powers the welcome panel's call-to-action — the first not-yet-complete
+    // level is always exactly the unlocked one a linear-progression player
+    // would resume at (same logic as Pages/Stats.razor's CurrentLevelId),
+    // or null once every level is done.
+    private Level? NextLevelToPlay => Levels.FirstOrDefault(l => !Game.IsLevelComplete(l));
+    private int UnlockedAchievementCount => Achievements.All.Count(a => Game.State.UnlockedAchievements.Contains(a.Id));
+
+    private int? CurrentLevelId;
+    private int CurrentTaskId = 1;
+    private string EditorCode = "";
+    private string? LastOutput;
+    private bool? LastPassed;
+    private int LastPointsAwarded;
+    private bool IsRunning;
+    private IReadOnlyList<CanvasCommand> LastCanvasCommands = [];
+    private int CanvasReplayToken;
+    private readonly List<Achievement> VisibleAchievements = [];
+    private Level? LevelCompletePopupLevel;
+    private bool ShowQuestCompletePopup;
+    private QuizStage? ActiveQuiz;
+    private Action? _afterQuiz;
+    private bool FlashcardFlipped;
+    private int FlashcardIndex;
+
+    private Level? CurrentLevel => CurrentLevelId is int id ? Levels.FirstOrDefault(l => l.Id == id) : null;
+    private GameTask? CurrentTask => CurrentLevel?.Tasks.FirstOrDefault(t => t.Id == CurrentTaskId);
+
+    private List<HintTier> RevealedHints
+    {
+        get
+        {
+            var task = CurrentTask;
+            if (task is null || CurrentLevelId is not int levelId) return [];
+            var count = Game.HintsRevealedFor(levelId, task.Id);
+            return task.Hints.Take(count).ToList();
+        }
+    }
+
+    private bool IsLoaded;
+    private string UsernameDraft = "";
+    private bool DemoArmed;
+    private bool DemoRunning;
+    private int DemoLiveLevelCount = 3;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Game.LoadAsync();
+        IsLoaded = true;
+    }
+
+    private async Task SubmitUsernameAsync()
+    {
+        var name = UsernameDraft.Trim();
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        if (await TryEnterDemoModeAsync(name)) return;
+
+        await Game.SetUsernameAsync(name);
+    }
+
+    // A presenter unlocks Demo Mode by typing a base64 string into the
+    // username box instead of a real name. The base64 check alone is a
+    // synchronous, near-zero-cost filter — an ordinary typed name essentially
+    // never happens to be valid base64 of length%4==0, so every real signup
+    // still submits instantly with no extra network round trip. Only a
+    // base64-shaped entry triggers one lookup for a matching static file
+    // under wwwroot/demo-unlock/ — the actual unlock phrase therefore never
+    // appears anywhere in the compiled app/WASM assemblies, only as a
+    // filename you choose when deploying.
+    private async Task<bool> TryEnterDemoModeAsync(string entered)
+    {
+        if (!TryDecodeBase64(entered, out var decoded)) return false;
+
+        // Optional ":<n>" suffix picks how many levels play out live before
+        // the rest are prefilled — e.g. base64("showtime-quest:1") for a
+        // 30-second demo, base64("showtime-quest:3") for a fuller one. The
+        // count itself doesn't need to be secret, only the base phrase does
+        // — one flag file on the server covers every count.
+        var parts = decoded.Split(':', 2);
+        var codeBase = parts[0];
+        var liveLevels = parts.Length > 1 && int.TryParse(parts[1], out var n)
+            ? Math.Clamp(n, 1, Levels.Count)
+            : 3;
+
+        string displayName;
+        try
+        {
+            var response = await Http.GetAsync($"demo-unlock/{Uri.EscapeDataString(codeBase)}.flag");
+            if (!response.IsSuccessStatusCode) return false;
+            displayName = (await response.Content.ReadAsStringAsync()).Trim();
+        }
+        catch
+        {
+            return false;
+        }
+
+        await Game.ResetAsync();
+        UsernameDraft = "";
+        DemoArmed = true;
+        DemoLiveLevelCount = liveLevels;
+
+        // The flag file's own text (e.g. "Demo Class") becomes the display
+        // name shown in the header and on the certificate, instead of
+        // hardcoding one in source — an empty file just leaves the demo
+        // session anonymous, same as before.
+        if (!string.IsNullOrWhiteSpace(displayName))
+        {
+            await Game.SetUsernameAsync(displayName);
+        }
+
+        return true;
+    }
+
+    private static bool TryDecodeBase64(string input, out string decoded)
+    {
+        decoded = "";
+        if (input.Length < 8 || input.Length % 4 != 0) return false;
+
+        Span<byte> buffer = stackalloc byte[input.Length];
+        if (!Convert.TryFromBase64String(input, buffer, out var written)) return false;
+
+        decoded = System.Text.Encoding.UTF8.GetString(buffer[..written]);
+        return decoded.Length > 0 && decoded.All(c => !char.IsControl(c));
+    }
+
+    private async Task OnUsernameKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await SubmitUsernameAsync();
+        }
+    }
+
+    private void SelectLevel(int levelId)
+    {
+        _ = Game.PlaySoundAsync(SoundEffect.LevelOpen);
+        CurrentLevelId = levelId;
+        var level = Levels.First(l => l.Id == levelId);
+        // Resume at the first not-yet-completed task, or the first task if the
+        // level was already fully cleared (lets a student replay it).
+        var firstIncomplete = level.Tasks.FirstOrDefault(t => !Game.IsTaskCompleted(levelId, t.Id));
+        var resumeTaskId = (firstIncomplete ?? level.Tasks[0]).Id;
+
+        // If a quiz stage gates progress at or before how far the student has
+        // actually completed tasks, land back on that quiz first — otherwise a
+        // reload mid-quiz (its in-memory state isn't persisted, unlike a
+        // passed result) would silently skip it since its gated task is
+        // already marked complete.
+        var highestCompletedTaskId = level.Tasks
+            .Where(t => Game.IsTaskCompleted(levelId, t.Id))
+            .Select(t => t.Id)
+            .DefaultIfEmpty(0)
+            .Max();
+        var gatingQuiz = level.QuizStagesOrEmpty
+            .Where(q => q.AfterTaskId <= highestCompletedTaskId && !Game.IsQuizPassed(levelId, q.AfterTaskId))
+            .OrderBy(q => q.AfterTaskId)
+            .FirstOrDefault();
+
+        if (gatingQuiz is not null)
+        {
+            ActiveQuiz = gatingQuiz;
+            _afterQuiz = () => ResumeAtTask(resumeTaskId);
+            return;
+        }
+
+        ResumeAtTask(resumeTaskId);
+    }
+
+    private void ResumeAtTask(int taskId)
+    {
+        CurrentTaskId = taskId;
+        LoadTaskIntoEditor();
+    }
+
+    private void LoadTaskIntoEditor()
+    {
+        LastOutput = null;
+        LastPassed = null;
+        LastPointsAwarded = 0;
+        LastCanvasCommands = [];
+        FlashcardFlipped = false;
+        FlashcardIndex = 0;
+        EditorCode = CurrentTask?.StarterCode ?? "";
+    }
+
+    private void FlipFlashcard()
+    {
+        if (FlashcardFlipped) return;
+        FlashcardFlipped = true;
+        _ = Game.PlaySoundAsync(SoundEffect.Navigate);
+    }
+
+    private void NextFlashcard()
+    {
+        var cards = CurrentTask?.Flashcards;
+        if (cards is null || FlashcardIndex >= cards.Count - 1) return;
+        FlashcardIndex++;
+        FlashcardFlipped = false;
+        _ = Game.PlaySoundAsync(SoundEffect.Navigate);
+    }
+
+    private async Task CompleteFlashcardAsync()
+    {
+        var task = CurrentTask;
+        if (task is null || CurrentLevelId is not int levelId) return;
+
+        var attempt = await Game.RecordAttemptAsync(levelId, task, Levels, passed: true);
+
+        if (attempt.PointsAwarded > 0)
+        {
+            await Game.PlaySoundAsync(SoundEffect.TaskComplete);
+        }
+
+        EnqueueAchievements(attempt.NewAchievements);
+
+        if (attempt.QuestCompleted)
+        {
+            EnqueueQuestComplete();
+        }
+        else if (attempt.LevelCompleted && CurrentLevel is not null)
+        {
+            EnqueueLevelComplete(CurrentLevel);
+        }
+
+        NextTask();
+    }
+
+    private void ResetCode()
+    {
+        EditorCode = CurrentTask?.StarterCode ?? "";
+        LastOutput = null;
+        LastPassed = null;
+        LastCanvasCommands = [];
+    }
+
+    private async Task RunAsync()
+    {
+        var task = CurrentTask;
+        if (task is null || CurrentLevelId is not int levelId) return;
+
+        IsRunning = true;
+        StateHasChanged();
+
+        var result = await Runner.RunAsync(EditorCode);
+        var passed = result.Success && task.Passes(result.Output, EditorCode);
+
+        LastOutput = result.Success ? (string.IsNullOrWhiteSpace(result.Output) ? "(no output)" : result.Output) : result.ErrorMessage;
+        LastPassed = passed;
+        LastCanvasCommands = result.CanvasCommands;
+
+        var attempt = await Game.RecordAttemptAsync(levelId, task, Levels, passed);
+        LastPointsAwarded = attempt.PointsAwarded;
+
+        if (attempt.Passed && attempt.PointsAwarded > 0)
+        {
+            await Game.PlaySoundAsync(SoundEffect.TaskComplete);
+        }
+        else if (!attempt.Passed)
+        {
+            await Game.PlaySoundAsync(SoundEffect.TaskFailed);
+        }
+
+        EnqueueAchievements(attempt.NewAchievements);
+
+        if (attempt.QuestCompleted)
+        {
+            EnqueueQuestComplete();
+        }
+        else if (attempt.LevelCompleted && CurrentLevel is not null)
+        {
+            EnqueueLevelComplete(CurrentLevel);
+        }
+
+        IsRunning = false;
+
+        if (passed)
+        {
+            // Auto-advance to the next task after a short pause so the pass
+            // feedback (and, for visual tasks, the canvas animation) has time
+            // to register instead of a "Next Task" click being required every
+            // time. Guarded on re-check below so a manual click (or the
+            // player navigating away) during the pause doesn't double-advance
+            // or jump the player back to a task they've already left.
+            _ = AutoAdvanceAsync(levelId, task.Id, LastCanvasCommands.Count > 0);
+        }
+    }
+
+    private async Task AutoAdvanceAsync(int levelId, int taskId, bool wasVisualTask)
+    {
+        await Task.Delay(wasVisualTask ? 3200 : 1700);
+        if (CurrentLevelId == levelId && CurrentTaskId == taskId && LastPassed == true)
+        {
+            NextTask();
+            StateHasChanged();
+        }
+    }
+
+    // Achievement popups, the level-complete popup, and the quest-complete
+    // popup used to each run on their own independent timer, fire-and-forget
+    // — so an achievement earned by the same task that finished a level
+    // could show up stacked behind/on top of the level-complete card at the
+    // same time. All three now share one queue so exactly one full-screen
+    // celebration is ever visible, in the order it was earned.
+    private readonly Queue<Func<Task>> _celebrationQueue = new();
+    private bool _celebrationQueueRunning;
+
+    // Every 5th thing that comes through the celebration queue (achievement,
+    // level-complete, or quest-complete — whichever it happens to be) also
+    // gets a little bonus flourish layered on top, so a long streak of
+    // unlocks doesn't feel monotonous. Cycles through a few visual styles
+    // rather than always the same one.
+    private static readonly string[] CelebrationFxStyles = ["confetti", "firework", "sparkle"];
+    private const int CelebrationFxEveryNth = 5;
+    private const int CelebrationFxPieceCount = 24;
+    private readonly Random _celebrationFxRandom = new();
+    private int _celebrationTriggerCount;
+    private string? ActiveCelebrationEffect;
+
+    private void EnqueueCelebration(Func<Task> showAsync)
+    {
+        _celebrationQueue.Enqueue(showAsync);
+        if (!_celebrationQueueRunning)
+        {
+            _ = ProcessCelebrationQueueAsync();
+        }
+    }
+
+    private async Task ProcessCelebrationQueueAsync()
+    {
+        _celebrationQueueRunning = true;
+
+        while (_celebrationQueue.TryDequeue(out var showAsync))
+        {
+            _celebrationTriggerCount++;
+            if (_celebrationTriggerCount % CelebrationFxEveryNth == 0)
+            {
+                TriggerCelebrationFx();
+            }
+
+            await showAsync();
+            await Task.Delay(300);
+        }
+
+        _celebrationQueueRunning = false;
+    }
+
+    private void TriggerCelebrationFx()
+    {
+        ActiveCelebrationEffect = CelebrationFxStyles[_celebrationFxRandom.Next(CelebrationFxStyles.Length)];
+        var token = _celebrationTriggerCount;
+        StateHasChanged();
+        _ = ClearCelebrationFxAsync(token);
+    }
+
+    private async Task ClearCelebrationFxAsync(int token)
+    {
+        await Task.Delay(2200);
+        if (_celebrationTriggerCount == token)
+        {
+            ActiveCelebrationEffect = null;
+            StateHasChanged();
+        }
+    }
+
+    private void EnqueueAchievements(IEnumerable<Achievement> achievements)
+    {
+        foreach (var achievement in achievements)
+        {
+            EnqueueCelebration(async () =>
+            {
+                await Game.PlaySoundAsync(SoundEffect.Achievement);
+                VisibleAchievements.Add(achievement);
+                StateHasChanged();
+                await Task.Delay(3000);
+                VisibleAchievements.Remove(achievement);
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void EnqueueLevelComplete(Level level)
+    {
+        EnqueueCelebration(async () =>
+        {
+            await Game.PlaySoundAsync(SoundEffect.LevelComplete);
+            LevelCompletePopupLevel = level;
+            StateHasChanged();
+            await Task.Delay(2600);
+            LevelCompletePopupLevel = null;
+            StateHasChanged();
+        });
+    }
+
+    private void EnqueueQuestComplete()
+    {
+        EnqueueCelebration(async () =>
+        {
+            await Game.PlaySoundAsync(SoundEffect.QuestComplete);
+            ShowQuestCompletePopup = true;
+            StateHasChanged();
+            await Task.Delay(5000);
+            ShowQuestCompletePopup = false;
+            StateHasChanged();
+        });
+    }
+
+    // Auto-plays a highlight reel for presenting to students: the first 3
+    // levels are completed task-by-task with the same pass/flashcard/
+    // achievement/level-complete feedback a real student would see, then the
+    // remaining levels are prefilled quickly (still through the real
+    // RecordAttemptAsync path, so points/streak/achievements all stay
+    // internally consistent) so the run lands on Quest Complete and the
+    // certificate without waiting through a full playthrough.
+    // Pacing knobs for RunDemoAsync — the "live" section plays each task out
+    // at roughly 2x its original speed so students have time to actually
+    // read what's happening; the "prefill" section (the rest of the levels,
+    // fast-forwarded after the live ones) is slowed down much more (4x) since
+    // it was originally tuned to be barely visible and felt too rushed.
+    private const int DemoLiveSpeed = 2;
+    private const int DemoPrefillSpeed = 4;
+
+    private async Task RunDemoAsync()
+    {
+        if (DemoRunning) return;
+        DemoRunning = true;
+        StateHasChanged();
+
+        try
+        {
+            foreach (var level in Levels.Take(DemoLiveLevelCount))
+            {
+                SelectLevel(level.Id);
+                StateHasChanged();
+                await Task.Delay(900 * DemoLiveSpeed);
+
+                foreach (var task in level.Tasks.OrderBy(t => t.Id))
+                {
+                    CurrentTaskId = task.Id;
+                    LoadTaskIntoEditor();
+                    StateHasChanged();
+
+                    if (task.Kind == TaskKind.Flashcard)
+                    {
+                        var cards = task.Flashcards!;
+                        for (var i = 0; i < cards.Count - 1; i++)
+                        {
+                            await Task.Delay(350 * DemoLiveSpeed);
+                            FlipFlashcard();
+                            StateHasChanged();
+                            await Task.Delay(400 * DemoLiveSpeed);
+                            NextFlashcard();
+                            StateHasChanged();
+                        }
+                        await Task.Delay(350 * DemoLiveSpeed);
+                        FlipFlashcard();
+                        StateHasChanged();
+                        await Task.Delay(500 * DemoLiveSpeed);
+                    }
+                    else
+                    {
+                        await Task.Delay(700 * DemoLiveSpeed);
+                        LastOutput = "Demo run — nice work! ✅";
+                        LastPassed = true;
+                        LastPointsAwarded = task.Points;
+                        StateHasChanged();
+                    }
+
+                    await DemoCompleteTaskAsync(level.Id, task);
+                    await Task.Delay((task.CheckSource is not null ? 2200 : 900) * DemoLiveSpeed);
+
+                    await DemoPassGatingQuizAsync(level, task.Id);
+                }
+            }
+
+            var lastLevel = Levels[^1];
+            var lastTaskId = lastLevel.Tasks.Max(t => t.Id);
+
+            foreach (var level in Levels.Skip(DemoLiveLevelCount))
+            {
+                CurrentLevelId = level.Id;
+                foreach (var task in level.Tasks.OrderBy(t => t.Id).Where(t => !Game.IsTaskCompleted(level.Id, t.Id)))
+                {
+                    CurrentTaskId = task.Id;
+                    StateHasChanged();
+
+                    if (level.Id == lastLevel.Id && task.Id == lastTaskId)
+                    {
+                        await Task.Delay(1000 * DemoPrefillSpeed);
+                    }
+
+                    await DemoCompleteTaskAsync(level.Id, task);
+                    await DemoPassGatingQuizAsync(level, task.Id);
+                    await Task.Delay(60 * DemoPrefillSpeed);
+                }
+            }
+
+            await Task.Delay(5200);
+            Nav.NavigateTo("certificate");
+        }
+        finally
+        {
+            DemoRunning = false;
+        }
+    }
+
+    private async Task DemoCompleteTaskAsync(int levelId, GameTask task)
+    {
+        var attempt = await Game.RecordAttemptAsync(levelId, task, Levels, passed: true);
+
+        if (attempt.PointsAwarded > 0)
+        {
+            await Game.PlaySoundAsync(SoundEffect.TaskComplete);
+        }
+
+        EnqueueAchievements(attempt.NewAchievements);
+
+        if (attempt.QuestCompleted)
+        {
+            EnqueueQuestComplete();
+        }
+        else if (attempt.LevelCompleted)
+        {
+            EnqueueLevelComplete(Levels.First(l => l.Id == levelId));
+            await Task.Delay(2700);
+        }
+    }
+
+    private async Task DemoPassGatingQuizAsync(Level level, int justCompletedTaskId)
+    {
+        var stage = level.QuizStagesOrEmpty.FirstOrDefault(q => q.AfterTaskId == justCompletedTaskId);
+        if (stage is not null && !Game.IsQuizPassed(level.Id, stage.AfterTaskId))
+        {
+            await Game.RecordQuizPassedAsync(level.Id, stage.AfterTaskId);
+        }
+    }
+
+    private async Task PlayVisualResultAsync()
+    {
+        var task = CurrentTask;
+        if (task is null || CurrentLevelId is not int levelId) return;
+
+        CanvasReplayToken++;
+
+        var play = await Game.RecordVisualPlayAsync(levelId, task, Levels);
+        EnqueueAchievements(play.NewAchievements);
+    }
+
+    private async Task RevealNextHintAsync()
+    {
+        var task = CurrentTask;
+        if (task is null || CurrentLevelId is not int levelId) return;
+        await Game.RevealNextHintAsync(levelId, task);
+    }
+
+    // No one-click "Copy solution" button anymore (removed deliberately — see
+    // git history) — the affordance is just tapping/clicking the code block
+    // itself, which is what CopySolutionAsync below does. It's still not an
+    // obvious, labeled button, so a student who wants to type it out by hand
+    // instead of tapping is nudged that way, but tapping is fast for anyone
+    // who just wants to grab it. Also tracked (via the solution <pre>'s native
+    // copy event, for manual select+copy) so the site owner can see how often
+    // students copy vs. type it themselves either way.
+    private int? _copiedTaskId;
+
+    private async Task CopySolutionAsync(int taskId, string code)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", code);
+        }
+        catch
+        {
+            // Clipboard API unavailable (insecure context, permissions) —
+            // the text is still selectable/copyable manually as a fallback.
+            return;
+        }
+
+        await OnSolutionCopiedAsync(taskId);
+
+        _copiedTaskId = taskId;
+        StateHasChanged();
+        await Task.Delay(1200);
+        if (_copiedTaskId == taskId)
+        {
+            _copiedTaskId = null;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSolutionCopiedAsync(int taskId)
+    {
+        if (CurrentLevelId is int levelId)
+        {
+            await Game.RecordSolutionCopiedAsync(levelId, taskId);
+        }
+    }
+
+    private void NextTask()
+    {
+        var level = CurrentLevel;
+        if (level is null) return;
+
+        var completedTaskId = CurrentTaskId;
+        var pendingQuiz = Game.PendingQuizAfter(level, completedTaskId);
+        if (pendingQuiz is not null)
+        {
+            ActiveQuiz = pendingQuiz;
+            _afterQuiz = () => AdvancePastTask(level, completedTaskId);
+            return;
+        }
+
+        AdvancePastTask(level, completedTaskId);
+    }
+
+    private void AdvancePastTask(Level level, int completedTaskId)
+    {
+        var tasksSorted = level.Tasks.OrderBy(t => t.Id).ToList();
+        var index = tasksSorted.FindIndex(t => t.Id == completedTaskId);
+        if (index >= 0 && index + 1 < tasksSorted.Count)
+        {
+            CurrentTaskId = tasksSorted[index + 1].Id;
+            LoadTaskIntoEditor();
+            return;
+        }
+
+        // Last task in the level — move to the next level's first task if one
+        // exists (it's guaranteed unlocked now, since this level is complete).
+        var levelIndex = Levels.ToList().FindIndex(l => l.Id == level.Id);
+        if (levelIndex >= 0 && levelIndex + 1 < Levels.Count)
+        {
+            SelectLevel(Levels[levelIndex + 1].Id);
+        }
+        else
+        {
+            CurrentLevelId = null;
+        }
+    }
+
+    private async Task OnQuizPassedAsync()
+    {
+        if (CurrentLevelId is int levelId && ActiveQuiz is not null)
+        {
+            await Game.RecordQuizPassedAsync(levelId, ActiveQuiz.AfterTaskId);
+        }
+
+        await Game.PlaySoundAsync(SoundEffect.QuizPass);
+
+        ActiveQuiz = null;
+        var resume = _afterQuiz;
+        _afterQuiz = null;
+        resume?.Invoke();
+    }
+
+    private async Task OnQuizFailedAsync((int Correct, int Total) result)
+    {
+        await Game.PlaySoundAsync(SoundEffect.QuizFail);
+
+        if (CurrentLevelId is int levelId && ActiveQuiz is not null)
+        {
+            await Game.RecordQuizFailedAttemptAsync(levelId, ActiveQuiz.AfterTaskId, result.Correct, result.Total);
+        }
+    }
+
+    private void PrevTask()
+    {
+        var level = CurrentLevel;
+        if (level is null) return;
+        var tasksSorted = level.Tasks.OrderBy(t => t.Id).ToList();
+        var index = tasksSorted.FindIndex(t => t.Id == CurrentTaskId);
+        if (index > 0)
+        {
+            CurrentTaskId = tasksSorted[index - 1].Id;
+            LoadTaskIntoEditor();
+        }
+    }
+}

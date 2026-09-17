@@ -1,0 +1,167 @@
+@page "/certificate"
+@using app.Content
+@using app.Services
+@inject GameStateService Game
+@inject IJSRuntime JS
+
+<PageTitle>Certificate — C# Code Quest</PageTitle>
+
+@if (!IsLoaded)
+{
+    <div class="stats-loading">Loading your certificate...</div>
+}
+else if (Game.State.CompletedAt is null)
+{
+    <div class="cert-shell">
+        <div class="cert-pending panel">
+            <img class="celebration-icon" src="icons/trophy.svg" alt="" />
+            <h1>Not finished yet</h1>
+            <p>
+                Complete every task in all @Levels.Count levels to earn your certificate.
+                You're at @LevelsCompleted/@Levels.Count levels right now — keep going!
+            </p>
+            <a class="btn-primary" href="">← Back to Quest</a>
+        </div>
+    </div>
+}
+else
+{
+    <div class="cert-shell">
+        <div class="cert-actions no-print">
+            <a class="btn-secondary" href="">← Back to Quest</a>
+            <button class="btn-primary" @onclick="PrintAsync">🖨️ Save as PDF / Print</button>
+            <button class="btn-secondary" @onclick="ShareAsync">🔗 Share</button>
+        </div>
+        @if (ShareMessage is not null)
+        {
+            <div class="stats-inline-note success no-print">@ShareMessage</div>
+        }
+
+        <div class="cert-card" id="certificate-card">
+            <div class="cert-border">
+                <img class="cert-badge" src="icons/trophy.svg" alt="" />
+                <div class="cert-kicker">Certificate of Completion</div>
+                <h1 class="cert-title">C# Code Quest</h1>
+                <div class="cert-subtitle">Fundamentals to Capstone</div>
+
+                <div class="cert-presented">This certifies that</div>
+                <div class="cert-name">@Game.State.Username</div>
+                <div class="cert-presented">
+                    has successfully completed all @Levels.Count levels and @TotalTasks tasks,
+                    mastering C# from first variables to classes, collections, and error handling.
+                </div>
+
+                <div class="cert-stats-row">
+                    <div class="cert-stat">
+                        <div class="cert-stat-value">@Game.State.Points</div>
+                        <div class="cert-stat-label">Points Earned</div>
+                    </div>
+                    <div class="cert-stat">
+                        <div class="cert-stat-value">@Game.State.MaxStreak</div>
+                        <div class="cert-stat-label">Best Streak</div>
+                    </div>
+                    <div class="cert-stat">
+                        <div class="cert-stat-value">@UnlockedAchievementCount/@Achievements.All.Count</div>
+                        <div class="cert-stat-label">Achievements</div>
+                    </div>
+                    @if (DaysToComplete is int days)
+                    {
+                        <div class="cert-stat">
+                            <div class="cert-stat-value">@days</div>
+                            <div class="cert-stat-label">@(days == 1 ? "Day to Complete" : "Days to Complete")</div>
+                        </div>
+                    }
+                </div>
+
+                <div class="cert-footer">
+                    <div class="cert-date">@Game.State.CompletedAt?.ToLocalTime().ToString("MMMM d, yyyy")</div>
+                    <div class="cert-issuer">🎮 C# Code Quest</div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool IsLoaded;
+    private string? ShareMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Game.LoadAsync();
+        IsLoaded = true;
+    }
+
+    private IReadOnlyList<Level> Levels => AllLevels.Levels;
+    private int TotalTasks => Levels.Sum(l => l.Tasks.Count);
+    private int LevelsCompleted => Levels.Count(Game.IsLevelComplete);
+    private int UnlockedAchievementCount => Achievements.All.Count(a => Game.State.UnlockedAchievements.Contains(a.Id));
+
+    // Inclusive day count (start day and finish day both count as "1" if the
+    // same calendar day) — null when StartedAt somehow isn't set, so the
+    // stat is simply omitted rather than showing a nonsense value.
+    private int? DaysToComplete =>
+        Game.State.StartedAt is { } started && Game.State.CompletedAt is { } completed
+            ? Math.Max(1, (completed.Date - started.Date).Days + 1)
+            : null;
+
+    private async Task PrintAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("print");
+        }
+        catch
+        {
+            // Printing unsupported/blocked in this environment — non-fatal,
+            // the certificate is still fully visible/screenshot-able on screen.
+        }
+    }
+
+    private async Task ShareAsync()
+    {
+        var title = "C# Code Quest — Certificate of Completion";
+        var text = $"{Game.State.Username} just completed C# Code Quest! 🎓";
+
+        // Progress lives only in this browser's localStorage — a shared link
+        // straight to /certificate would just show whoever opens it THEIR
+        // OWN certificate (or "not finished yet"), not this player's. So the
+        // link always points at the plain landing page; the actual proof
+        // (name/points/date) goes out as a hand-drawn snapshot image instead
+        // — see certificateShare.js's shareImage/renderCertificatePng. Drawn
+        // from these plain values (not a DOM screenshot) because this page's
+        // CSS custom properties and gradient-clipped text don't render
+        // reliably through screenshot libraries.
+        var landingUrl = "https://zinoadidi.github.io/csharp-code-quest/";
+        var cert = new
+        {
+            username = Game.State.Username,
+            points = Game.State.Points,
+            maxStreak = Game.State.MaxStreak,
+            achievementsUnlocked = UnlockedAchievementCount,
+            achievementsTotal = Achievements.All.Count,
+            totalTasks = TotalTasks,
+            daysToComplete = DaysToComplete,
+            dateText = Game.State.CompletedAt?.ToLocalTime().ToString("MMMM d, yyyy"),
+        };
+
+        string result;
+        try
+        {
+            result = await JS.InvokeAsync<string>("certificateShare.shareImage", cert, title, text, landingUrl);
+        }
+        catch
+        {
+            result = "unavailable";
+        }
+
+        ShareMessage = result switch
+        {
+            "shared" => "Shared!",
+            "downloaded" => "Saved the certificate image — attach it wherever you'd like to share it!",
+            "copied" => "Copied a shareable summary to your clipboard!",
+            "cancelled" => null,
+            _ => "Sharing isn't available here — try a screenshot instead.",
+        };
+    }
+}

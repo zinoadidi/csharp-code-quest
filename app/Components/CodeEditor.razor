@@ -1,0 +1,61 @@
+@* A real code editor (CodeMirror 5 under the hood, see wwwroot/js/codeEditor.js)
+   for student code input — replaces a plain <textarea> with syntax highlighting,
+   line numbers, and bracket matching, which matters for a coding game where the
+   editor is the main thing a student stares at. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div id="@_elementId" class="code-editor-host"></div>
+
+@code {
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    private readonly string _elementId = "code-editor-" + Guid.NewGuid().ToString("N");
+    private DotNetObjectReference<CodeEditor>? _selfRef;
+    private bool _initialized;
+    private string _lastKnownValue = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            _lastKnownValue = Value;
+            await JS.InvokeVoidAsync("codeEditorInterop.initEditor", _elementId, _selfRef, Value);
+            _initialized = true;
+        }
+        else if (_initialized && Value != _lastKnownValue)
+        {
+            // Value changed from outside (e.g. switching to a different task) —
+            // push it into the editor. Our own edits already match _lastKnownValue
+            // so this doesn't fight the user while they're typing.
+            _lastKnownValue = Value;
+            await JS.InvokeVoidAsync("codeEditorInterop.setValue", _elementId, Value);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnCodeChanged(string value)
+    {
+        _lastKnownValue = value;
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_initialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("codeEditorInterop.disposeEditor", _elementId);
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone (page navigation/close) — nothing to clean up.
+            }
+        }
+        _selfRef?.Dispose();
+    }
+}

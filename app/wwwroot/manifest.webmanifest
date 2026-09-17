@@ -1,0 +1,23 @@
+{
+  "name": "C# Code Quest",
+  "short_name": "Code Quest",
+  "description": "Learn C# from basics to intermediate through interactive tasks, hints, and mini-games.",
+  "id": "./",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0f0c29",
+  "theme_color": "#302b63",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    },
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish
+        run: dotnet publish app/app.csproj -c Release -o publish-output
+
+      # GitHub Pages serves a non-root-named repo at
+      # https://<user>.github.io/<repo>/, so the app's base href (hardcoded to
+      # "/" in wwwroot/index.html for local dev, where it's served at the
+      # domain root) needs to point at that subfolder only in this published
+      # copy. See REQUIREMENTS.md's "Installable / offline (PWA)" section.
+      - name: Fix base href for GitHub Pages subfolder
+        run: |
+          sed -i 's|<base href="/" />|<base href="/${{ github.event.repository.name }}/" />|' publish-output/wwwroot/index.html
+          sed -i 's|const base = "/";|const base = "/${{ github.event.repository.name }}/";|' publish-output/wwwroot/service-worker.js
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: publish-output/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

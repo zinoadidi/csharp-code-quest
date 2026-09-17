@@ -1,0 +1,101 @@
+@* Replays a recorded list of app.GameApi.Canvas commands as a simple animation
+   — shapes as absolutely-positioned, CSS-transitioned divs on a fixed-size
+   "stage". This is the render side of "visual game mode" tasks (see
+   REQUIREMENTS.md): the student's code runs to completion first (same
+   run-then-look-at-result model as every text task), producing a command log,
+   which this component then plays back step by step. *@
+@using app.GameApi
+
+<div class="canvas-stage" style="width:@(Width)px; height:@(Height)px;">
+    @foreach (var shape in Shapes.Values)
+    {
+        <div class="canvas-shape canvas-shape-@shape.Type"
+             style="left:@(shape.X)px; top:@(shape.Y)px; width:@(shape.Size)px; height:@(shape.Size)px; background:@shape.Color; --tri-color:@shape.Color;">
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public IReadOnlyList<CanvasCommand> Commands { get; set; } = [];
+    [Parameter] public int Width { get; set; } = 360;
+    [Parameter] public int Height { get; set; } = 240;
+
+    // Bump this (e.g. from a "Play Again" button) to force a replay of the same
+    // Commands list — plain content-equality checks below would otherwise skip
+    // re-animating identical commands.
+    [Parameter] public int ReplayToken { get; set; }
+
+    private sealed class ShapeState
+    {
+        public required string Type;
+        public double X;
+        public double Y;
+        public double Size = 40;
+        public string Color = "#7dd3fc";
+    }
+
+    private readonly Dictionary<string, ShapeState> Shapes = new();
+    private IReadOnlyList<CanvasCommand> _lastPlayed = [];
+    private int _lastReplayToken = -1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var forcedReplay = ReplayToken != _lastReplayToken;
+        if (!forcedReplay && (ReferenceEquals(Commands, _lastPlayed) || Commands.SequenceEqual(_lastPlayed)))
+        {
+            return;
+        }
+        _lastPlayed = Commands;
+        _lastReplayToken = ReplayToken;
+
+        Shapes.Clear();
+        StateHasChanged();
+
+        foreach (var cmd in Commands)
+        {
+            Apply(cmd);
+            StateHasChanged();
+            await Task.Delay(350);
+        }
+    }
+
+    private void Apply(CanvasCommand cmd)
+    {
+        switch (cmd.Kind)
+        {
+            case "add":
+                Shapes[cmd.ShapeId] = new ShapeState
+                {
+                    Type = cmd.ShapeType ?? "square",
+                    X = cmd.X ?? 0,
+                    Y = cmd.Y ?? 0,
+                    Size = cmd.Size ?? 40,
+                    Color = cmd.Color ?? "#7dd3fc",
+                };
+                break;
+            case "move":
+                if (Shapes.TryGetValue(cmd.ShapeId, out var moved))
+                {
+                    moved.X = cmd.X ?? moved.X;
+                    moved.Y = cmd.Y ?? moved.Y;
+                }
+                break;
+            case "moveBy":
+                if (Shapes.TryGetValue(cmd.ShapeId, out var movedBy))
+                {
+                    movedBy.X += cmd.X ?? 0;
+                    movedBy.Y += cmd.Y ?? 0;
+                }
+                break;
+            case "color":
+                if (Shapes.TryGetValue(cmd.ShapeId, out var recolored))
+                {
+                    recolored.Color = cmd.Color ?? recolored.Color;
+                }
+                break;
+            case "remove":
+                Shapes.Remove(cmd.ShapeId);
+                break;
+        }
+    }
+}

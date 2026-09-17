@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>C# Code Quest</title>
+    <script>
+        // GitHub Pages is static hosting with no server-side route rewriting —
+        // a direct link or a page refresh on a Blazor route (e.g. "/stats" or
+        // "/certificate") requests that literal path, which doesn't exist as a
+        // file, so GitHub serves this 404 page instead of wwwroot/index.html.
+        // Standard SPA-on-GitHub-Pages workaround (see
+        // https://github.com/rafgraph/spa-github-pages): redirect to the site
+        // root with the real path encoded in the query string; the matching
+        // inline script in index.html decodes it back via history.replaceState
+        // before Blazor's router ever looks at the URL.
+        //
+        // pathSegmentsToKeep is 1 because this project deploys to GitHub
+        // Pages' project-site form (https://<user>.github.io/<repo>/...) — the
+        // repo-name segment must be kept as part of the redirect target. It
+        // does not need to change if the repo is ever renamed (the base-href
+        // injection in .github/workflows/deploy.yml handles the name itself;
+        // this is just a segment COUNT).
+        var pathSegmentsToKeep = 1;
+
+        var l = window.location;
+        var redirectPath = l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/';
+        var afterBase = l.pathname.slice(redirectPath.length);
+
+        l.replace(
+            l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+            redirectPath +
+            '?p=/' + afterBase.replace(/&/g, '~and~') +
+            (l.search ? '&q=' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+            l.hash
+        );
+    </script>
+</head>
+<body></body>
+</html>

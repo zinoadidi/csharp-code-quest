@@ -1,0 +1,243 @@
+@* A retry-until-you-pass flash card quiz (see content/Models.cs's QuizStage)
+   inserted between tasks to reinforce keywords/concepts via quick recall
+   rather than writing code. Two presentation formats share this component:
+   MultipleChoice (pick 1 of 4) and SwipeTrueFalse (drag/tap true or false).
+   Each attempt samples a random subset from the stage's card pool so a
+   retry — or a different player — doesn't see the exact same set/order. *@
+@using app.Content
+@using app.Services
+@inject GameStateService Game
+
+<div class="quiz-stage">
+    <div class="quiz-header">
+        <img class="quiz-badge" src="icons/brain.svg" alt="" />
+        <h2>@Stage.Title</h2>
+        <p>
+            @if (Stage.Format == QuizFormat.SwipeTrueFalse)
+            {
+                <text>Swipe or tap right for True, left for False — @_order.Count cards.</text>
+            }
+            else
+            {
+                <text>Quick recall check — answer @_order.Count card@(_order.Count == 1 ? "" : "s") to keep going.</text>
+            }
+        </p>
+    </div>
+
+    @if (!Finished)
+    {
+        var card = _order[_index];
+        <div class="quiz-progress">Card @(_index + 1) of @_order.Count</div>
+
+        @if (Stage.Format == QuizFormat.SwipeTrueFalse)
+        {
+            <div class="swipe-deck" @key="_index">
+                <div class="swipe-card @(_selected is not null ? (_selected == card.CorrectIndex ? "swipe-correct" : "swipe-incorrect") : "")"
+                     style="@SwipeCardStyle"
+                     @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="OnPointerUp" @onpointercancel="OnPointerUp">
+                    <div class="swipe-hint swipe-hint-true" style="opacity:@(Math.Max(0, _dragX) / 80.0)">TRUE</div>
+                    <div class="swipe-hint swipe-hint-false" style="opacity:@(Math.Max(0, -_dragX) / 80.0)">FALSE</div>
+                    <div class="quiz-prompt">@card.Prompt</div>
+                </div>
+                <div class="swipe-buttons">
+                    <button class="swipe-btn swipe-btn-false" disabled="@(_selected is not null)" @onclick="() => SelectOption(1)">👎 False</button>
+                    <button class="swipe-btn swipe-btn-true" disabled="@(_selected is not null)" @onclick="() => SelectOption(0)">👍 True</button>
+                </div>
+                @if (_selected is not null)
+                {
+                    <button class="btn-primary quiz-next-btn" @onclick="NextCard">@(_index + 1 < _order.Count ? "Next Card →" : "See Results")</button>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="quiz-card" @key="_index">
+                <div class="quiz-prompt">@card.Prompt</div>
+                <div class="quiz-options">
+                    @for (var i = 0; i < _optionOrder.Count; i++)
+                    {
+                        var optionIndex = _optionOrder[i];
+                        var isSelected = _selected == optionIndex;
+                        var isCorrectOption = optionIndex == card.CorrectIndex;
+                        var cls = "quiz-option"
+                            + (isSelected ? " selected" : "")
+                            + (_selected is not null && isCorrectOption ? " correct" : "")
+                            + (_selected is not null && isSelected && !isCorrectOption ? " incorrect" : "");
+                        var capturedIndex = optionIndex;
+                        <button class="@cls" disabled="@(_selected is not null)" @onclick="() => SelectOption(capturedIndex)">
+                            @card.Options[capturedIndex]
+                        </button>
+                    }
+                </div>
+                @if (_selected is not null)
+                {
+                    <button class="btn-primary quiz-next-btn" @onclick="NextCard">@(_index + 1 < _order.Count ? "Next Card →" : "See Results")</button>
+                }
+            </div>
+        }
+    }
+    else
+    {
+        var passed = _correctCount >= _order.Count * QuizStage.PassThreshold;
+        <div class="quiz-results">
+            <div class="quiz-results-icon">@(passed ? "🎉" : "📚")</div>
+            <h3>@(passed ? "Quiz passed!" : "Not quite there yet")</h3>
+            <p>You got @_correctCount out of @_order.Count right.</p>
+            @if (passed)
+            {
+                <button class="btn-next" @onclick="() => OnPassed.InvokeAsync()">Continue →</button>
+            }
+            else
+            {
+                <button class="btn-primary" @onclick="Restart">↻ Try Again</button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public QuizStage Stage { get; set; } = null!;
+    [Parameter] public EventCallback OnPassed { get; set; }
+    [Parameter] public EventCallback<(int Correct, int Total)> OnFailed { get; set; }
+
+    private List<QuizCard> _order = [];
+    private List<int> _optionOrder = [];
+    private int _index;
+    private int? _selected;
+    private int _correctCount;
+    private double _dragX;
+    private bool _dragging;
+    private bool Finished => _index >= _order.Count;
+
+    private string SwipeCardStyle
+    {
+        get
+        {
+            var rotate = _dragX / 12.0;
+            var transition = _dragging ? "none" : "transform 0.25s ease";
+            return $"transform: translateX({_dragX.ToString(System.Globalization.CultureInfo.InvariantCulture)}px) rotate({rotate.ToString(System.Globalization.CultureInfo.InvariantCulture)}deg); transition: {transition};";
+        }
+    }
+
+    private QuizStage? _stageForOrder;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(_stageForOrder, Stage))
+        {
+            Restart();
+        }
+    }
+
+    private void Restart()
+    {
+        _stageForOrder = Stage;
+        var count = Math.Clamp(Stage.QuestionsPerAttempt, 1, Stage.Cards.Count);
+        _order = Stage.Cards.OrderBy(_ => Random.Shared.Next()).Take(count).ToList();
+        _index = 0;
+        _selected = null;
+        _correctCount = 0;
+        _dragX = 0;
+        _dragging = false;
+        ShuffleOptionsForCurrentCard();
+    }
+
+    private void ShuffleOptionsForCurrentCard()
+    {
+        if (_index >= _order.Count) return;
+        _optionOrder = Enumerable.Range(0, _order[_index].Options.Count).OrderBy(_ => Random.Shared.Next()).ToList();
+    }
+
+    private void SelectOption(int optionIndex)
+    {
+        if (_selected is not null) return;
+        _selected = optionIndex;
+        _dragX = optionIndex == 0 ? 140 : -140;
+        if (optionIndex == _order[_index].CorrectIndex)
+        {
+            _correctCount++;
+            _ = Game.PlaySoundAsync(SoundEffect.QuizCorrect);
+        }
+        else
+        {
+            _ = Game.PlaySoundAsync(SoundEffect.QuizIncorrect);
+        }
+
+        // Auto-advance shortly after answering (same idea as Home.razor's task
+        // auto-advance) instead of requiring a "Next Card"/"See Results" tap
+        // on every single card — just long enough to actually see the
+        // correct/incorrect highlight. The "Next Card" button still works to
+        // skip the wait; the index/selection guard below stops this from
+        // double-firing if it does.
+        _ = AutoAdvanceCardAsync(_index);
+    }
+
+    private async Task AutoAdvanceCardAsync(int cardIndex)
+    {
+        await Task.Delay(900);
+        if (_index == cardIndex && _selected is not null)
+        {
+            await NextCard();
+            StateHasChanged();
+        }
+    }
+
+    private async Task NextCard()
+    {
+        _index++;
+        _selected = null;
+        _dragX = 0;
+        _dragging = false;
+
+        if (Finished)
+        {
+            var passed = _correctCount >= _order.Count * QuizStage.PassThreshold;
+            if (!passed)
+            {
+                await OnFailed.InvokeAsync((_correctCount, _order.Count));
+            }
+            return;
+        }
+
+        ShuffleOptionsForCurrentCard();
+    }
+
+    // Swipe gesture: drag horizontally, release past a threshold to answer
+    // True (right) or False (left); release short of it and the card snaps
+    // back to center via the CSS transition in SwipeCardStyle. Mouse/touch/pen
+    // all funnel through the same pointer events.
+    private const double SwipeThreshold = 80;
+    private double _dragStartX;
+
+    private void OnPointerDown(Microsoft.AspNetCore.Components.Web.PointerEventArgs e)
+    {
+        if (_selected is not null) return;
+        _dragging = true;
+        _dragStartX = e.ClientX;
+    }
+
+    private void OnPointerMove(Microsoft.AspNetCore.Components.Web.PointerEventArgs e)
+    {
+        if (!_dragging || _selected is not null) return;
+        _dragX = e.ClientX - _dragStartX;
+    }
+
+    private void OnPointerUp(Microsoft.AspNetCore.Components.Web.PointerEventArgs e)
+    {
+        if (!_dragging || _selected is not null) return;
+        _dragging = false;
+
+        if (_dragX > SwipeThreshold)
+        {
+            SelectOption(0);
+        }
+        else if (_dragX < -SwipeThreshold)
+        {
+            SelectOption(1);
+        }
+        else
+        {
+            _dragX = 0;
+        }
+    }
+}

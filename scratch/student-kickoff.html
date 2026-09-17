@@ -1,0 +1,494 @@
+<!doctype html>
+<title>Code Quest Setup</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Karla:ital,wght@0,400;0,500;0,700;1,400&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #100e1c;
+    --surface: #1a1730;
+    --surface-2: #221d3d;
+    --border: rgba(167, 148, 230, 0.22);
+    --text: #eee9fb;
+    --text-dim: #a99fc9;
+    --accent: #7dd3fc;
+    --accent-dim: #4f8fae;
+    --warm: #facc15;
+    --font-display: "Outfit", system-ui, sans-serif;
+    --font-body: "Karla", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f4fb;
+      --surface: #ffffff;
+      --surface-2: #eeeafa;
+      --border: rgba(96, 74, 166, 0.16);
+      --text: #211c38;
+      --text-dim: #5c5480;
+      --accent: #0f7ea8;
+      --accent-dim: #3fa2c4;
+      --warm: #a8720a;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f4fb;
+    --surface: #ffffff;
+    --surface-2: #eeeafa;
+    --border: rgba(96, 74, 166, 0.16);
+    --text: #211c38;
+    --text-dim: #5c5480;
+    --accent: #0f7ea8;
+    --accent-dim: #3fa2c4;
+    --warm: #a8720a;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); }
+  body {
+    margin: 0;
+    padding-block: 2.75rem;
+    padding-top: calc(2.75rem + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(2.75rem + env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 16.5px;
+    line-height: 1.55;
+  }
+
+  .sheet {
+    max-width: 46rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2.25rem;
+  }
+
+  header.top {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(1.9rem, 5vw, 2.5rem);
+    margin: 0;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  .lede {
+    color: var(--text-dim);
+    max-width: 42ch;
+    font-size: 1.02rem;
+  }
+
+  .lede code, .steps code, .device-card code {
+    font-family: var(--font-mono);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 0.3rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.88em;
+    color: var(--accent);
+  }
+
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.3rem;
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+  }
+
+  h2 .num {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--accent-dim);
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    padding: 1.4rem 1.5rem;
+  }
+
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+
+  .steps li {
+    display: grid;
+    grid-template-columns: 1.6rem 1fr;
+    gap: 0.75rem;
+    align-items: start;
+  }
+
+  .steps li::before {
+    counter-increment: step;
+    content: counter(step);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--bg);
+    background: var(--accent);
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .steps { counter-reset: step; }
+
+  .step-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .steps strong { color: var(--text); }
+  .steps .sub { color: var(--text-dim); font-size: 0.95rem; }
+
+  .url-box {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 0.7rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    color: var(--accent);
+    flex-wrap: wrap;
+  }
+
+  .devices {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+
+  @media (max-width: 560px) {
+    .devices { grid-template-columns: 1fr; }
+  }
+
+  .device-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+    padding: 1.25rem 1.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .device-card h3 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.02rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .os-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+
+  .os-label {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .os-block ol {
+    margin: 0;
+    padding-left: 1.15rem;
+    font-size: 0.94rem;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 0;
+  }
+
+  table.plan {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.94rem;
+  }
+
+  table.plan th {
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+    padding: 0 0.6rem 0.6rem 0;
+  }
+
+  table.plan td {
+    padding: 0.65rem 0.6rem 0.65rem 0;
+    border-top: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  table.plan td.week {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  table.plan td.hours {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .levels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .level-chip {
+    font-size: 0.85rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    padding: 0.2rem 0.55rem;
+    white-space: nowrap;
+  }
+
+  .pace-note {
+    display: flex;
+    gap: 0.9rem;
+    align-items: flex-start;
+    background: var(--surface-2);
+    border-left: 3px solid var(--warm);
+    border-radius: 0 0.5rem 0.5rem 0;
+    padding: 0.9rem 1.1rem;
+    font-size: 0.94rem;
+    color: var(--text-dim);
+  }
+
+  .pace-note strong { color: var(--text); }
+
+  footer {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    text-align: center;
+    padding-top: 0.5rem;
+  }
+
+  a { color: var(--accent); }
+</style>
+
+<div class="sheet">
+  <header class="top">
+    <div class="eyebrow">Before Week 1</div>
+    <h1>Get set up for C# Code Quest</h1>
+    <p class="lede">
+      Please do this before Level 1. It takes about ten minutes. There's
+      nothing to install and no account to create — it runs in your browser
+      and saves your progress on this device.
+    </p>
+  </header>
+
+  <section>
+    <h2><span class="num">01</span> Create your save</h2>
+    <div class="panel">
+      <ol class="steps">
+        <li>
+          <div class="step-body">
+            <strong>Open the quest.</strong>
+            <span class="sub">Go to the link below on the device you'll practice on most.</span>
+          </div>
+        </li>
+        <li>
+          <div class="step-body">
+            <strong>Enter your name</strong>
+            <span class="sub">Type it at the "Welcome, adventurer!" prompt. It's just a label for your save — there's no password.</span>
+          </div>
+        </li>
+        <li>
+          <div class="step-body">
+            <strong>Start Level 1.</strong>
+            <span class="sub">Your points, streak, and progress save automatically to this browser as you go.</span>
+          </div>
+        </li>
+      </ol>
+      <div class="url-box">
+        <span>https://zinoadidi.github.io/csharp-code-quest/</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span> Add it to your home screen</h2>
+    <p class="lede" style="max-width: 100%;">
+      Optional. This adds an icon so you can open the app directly, without
+      opening your browser first. Do it on whichever device you'll practice
+      on — phone, laptop, or both.
+    </p>
+    <div class="devices">
+      <div class="device-card">
+        <h3>📱 Phone</h3>
+        <div class="os-block">
+          <span class="os-label">iPhone · Safari</span>
+          <ol>
+            <li>Open the link in <strong>Safari</strong> (not Chrome — iOS requires Safari for this)</li>
+            <li>Tap the <strong>Share</strong> icon (square with an arrow)</li>
+            <li>Scroll down, tap <strong>Add to Home Screen</strong> → <strong>Add</strong></li>
+          </ol>
+        </div>
+        <hr class="divider" />
+        <div class="os-block">
+          <span class="os-label">Android · Chrome</span>
+          <ol>
+            <li>Open the link in <strong>Chrome</strong></li>
+            <li>Tap the <strong>⋮</strong> menu, top right</li>
+            <li>Tap <strong>Install app</strong> (or <strong>Add to Home screen</strong>)</li>
+          </ol>
+        </div>
+      </div>
+      <div class="device-card">
+        <h3>💻 Laptop</h3>
+        <div class="os-block">
+          <span class="os-label">Chrome / Edge</span>
+          <ol>
+            <li>Open the link</li>
+            <li>Click the <strong>install icon</strong> in the address bar (a monitor with a ↓)</li>
+            <li>Click <strong>Install</strong></li>
+          </ol>
+        </div>
+        <hr class="divider" />
+        <div class="os-block">
+          <span class="os-label">Mac · Safari</span>
+          <ol>
+            <li>Open the link</li>
+            <li><strong>File</strong> menu → <strong>Add to Dock</strong></li>
+            <li>(Older macOS: just bookmark the tab instead)</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span> Your 4-week plan</h2>
+    <p class="lede" style="max-width: 100%;">
+      12 levels, 3 per week, Capstone in week 4. Plan for about
+      <strong style="color: var(--text)">4–5 hours a week</strong> — either
+      three 90-minute sessions, or roughly 40 minutes most days.
+    </p>
+    <div class="panel">
+      <table class="plan">
+        <thead>
+          <tr><th>Week</th><th>Levels</th><th>~Hours</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="week">Week 1</td>
+            <td class="levels">
+              <span class="level-chip">1 · Fundamentals &amp; First Wins</span>
+              <span class="level-chip">2 · Operators &amp; Expressions</span>
+              <span class="level-chip">3 · Control Flow</span>
+            </td>
+            <td class="hours">~4.5h</td>
+          </tr>
+          <tr>
+            <td class="week">Week 2</td>
+            <td class="levels">
+              <span class="level-chip">4 · Loops</span>
+              <span class="level-chip">5 · Arrays &amp; Collections I</span>
+              <span class="level-chip">6 · Methods &amp; Functions</span>
+            </td>
+            <td class="hours">~4.5h</td>
+          </tr>
+          <tr>
+            <td class="week">Week 3</td>
+            <td class="levels">
+              <span class="level-chip">7 · Strings &amp; Text Processing</span>
+              <span class="level-chip">8 · Classes &amp; Objects I</span>
+              <span class="level-chip">9 · Classes &amp; Objects II</span>
+            </td>
+            <td class="hours">~4.5h</td>
+          </tr>
+          <tr>
+            <td class="week">Week 4</td>
+            <td class="levels">
+              <span class="level-chip">10 · Collections &amp; LINQ</span>
+              <span class="level-chip">11 · Error Handling &amp; Robustness</span>
+              <span class="level-chip">12 · Capstone</span>
+            </td>
+            <td class="hours">~5h</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pace-note">
+      <span>⏱️</span>
+      <span>
+        <strong>If you get behind, keep going.</strong> Every level you reach
+        stays unlocked, hints are always available, and failed attempts don't
+        count against you — retry as many times as you need. Finish the
+        Capstone to get your certificate.
+      </span>
+    </div>
+  </section>
+
+  <footer>
+    Questions? Ask in class. Otherwise, start Level 1 whenever you're ready.
+  </footer>
+</div>

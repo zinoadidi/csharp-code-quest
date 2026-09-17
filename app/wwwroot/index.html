@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>C# Code Quest</title>
+    <base href="/" />
+    <script>
+        // Other half of the wwwroot/404.html redirect trick — decodes a path
+        // GitHub Pages bounced through the 404 page (see 404.html's comment
+        // for the full story) back into a real URL via history.replaceState,
+        // before Blazor's router (later in this file) ever reads
+        // window.location. A normal load (no "?p=..." from 404.html) leaves
+        // the URL untouched. Must run this early — before anything inspects
+        // the URL — so it's inline, right after <base href>.
+        (function (l) {
+            var params = new URLSearchParams(l.search);
+            var redirectedPath = params.get('p');
+            if (redirectedPath === null) return;
+
+            var unescape = function (s) { return s.replace(/~and~/g, '&'); };
+            var restoredSearch = params.get('q');
+            var newUrl = l.pathname.slice(0, -1) + unescape(redirectedPath) +
+                (restoredSearch !== null ? '?' + unescape(restoredSearch) : '') +
+                l.hash;
+            window.history.replaceState(null, null, newUrl);
+        })(window.location);
+    </script>
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="lib/codemirror/codemirror.min.css" />
+    <link rel="stylesheet" href="lib/codemirror/dracula.min.css" />
+    <!-- If you add any scoped CSS files, uncomment the following to load them
+    <link href="app.styles.css" rel="stylesheet" /> -->
+    <!-- PWA: makes the game installable (Add to Home Screen / as a desktop app)
+         and, combined with the service worker registered below, usable offline
+         once cached. See app.csproj and wwwroot/service-worker*.js. -->
+    <link href="manifest.webmanifest" rel="manifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+    <meta name="theme-color" content="#302b63" />
+    <script type="importmap"></script>
+    <script>
+        // Applies the player's saved theme before first paint, so switching
+        // pages/reloading never flashes the wrong theme while Blazor boots.
+        // Reads the same localStorage blob GameStateService persists to
+        // (Services/GameState.cs's Theme field) — duplicated inline here
+        // (rather than deferring to js/theme.js) specifically so it can run
+        // synchronously, this early, with no extra script request.
+        (function () {
+            try {
+                var raw = localStorage.getItem("csharpCodeQuestState");
+                var theme = raw && JSON.parse(raw).Theme;
+                if (theme === "light" || theme === "dark") {
+                    document.documentElement.setAttribute("data-theme", theme);
+                }
+            } catch (e) {
+                // localStorage unavailable/corrupt — falls back to system theme.
+            }
+        })();
+    </script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="boot-screen">
+            <img class="boot-badge" src="icons/controller.svg" alt="" />
+            <h1 class="boot-title">C# Code Quest</h1>
+            <p class="boot-subtitle" id="boot-tip">Warming up the compiler&hellip;</p>
+
+            <!-- Classes/structure below are load-bearing: Blazor's own boot JS sets
+                 --blazor-load-percentage / --blazor-load-percentage-text on these
+                 exact elements as real assets download. Re-skinned in app.css to look
+                 like a game progress bar instead of the default spinner circle. -->
+            <svg class="loading-progress">
+                <circle r="40%" cx="50%" cy="50%" />
+                <circle r="40%" cx="50%" cy="50%" />
+            </svg>
+            <div class="loading-progress-text"></div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script>
+        // Purely decorative flavor text while the .NET/Roslyn payload downloads —
+        // independent of the real load percentage above.
+        const bootTips = [
+            "Warming up the compiler…",
+            "Loading the real C# runtime (no faking it this time)…",
+            "Sharpening semicolons…",
+            "Teaching Roslyn some new tricks…",
+            "Feeding the hint hamsters…",
+            "Almost ready to quest…",
+        ];
+        let bootTipIndex = 0;
+        setInterval(() => {
+            const el = document.getElementById("boot-tip");
+            if (!el) return; // boot screen already swapped out for the real app
+            bootTipIndex = (bootTipIndex + 1) % bootTips.length;
+            el.textContent = bootTips[bootTipIndex];
+        }, 2200);
+    </script>
+    <script src="lib/codemirror/codemirror.min.js"></script>
+    <script src="lib/codemirror/mode/clike/clike.min.js"></script>
+    <script src="lib/codemirror/matchbrackets.min.js"></script>
+    <script src="js/codeEditor.js"></script>
+    <script src="js/sfx.js"></script>
+    <script src="js/theme.js"></script>
+    <script src="js/certificateShare.js"></script>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <script>navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });</script>
+    <script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "yiv4v33kd8");
+</script>
+</body>
+
+</html>

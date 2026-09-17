@@ -1,0 +1,336 @@
+@page "/stats"
+@using app.Content
+@using app.Services
+@inject GameStateService Game
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>Your Journey — C# Code Quest</PageTitle>
+
+@if (!IsLoaded)
+{
+    <div class="stats-loading">Loading your journey...</div>
+}
+else
+{
+    <div class="stats-shell">
+        <header class="stats-header">
+            <a class="btn-secondary stats-back" href="" @onclick="() => _ = Game.PlaySoundAsync(SoundEffect.Navigate)">← Back to Quest</a>
+            <div class="stats-header-toggles">
+                <button class="btn-secondary sound-toggle" @onclick="Game.ToggleSoundAsync" title="@(Game.State.SoundEnabled ? "Mute sound effects" : "Unmute sound effects")">
+                    @(Game.State.SoundEnabled ? "🔊" : "🔇")
+                </button>
+                <button class="btn-secondary theme-toggle" @onclick="Game.CycleThemeAsync" title="@Game.ThemeLabel">
+                    @Game.ThemeIcon
+                </button>
+            </div>
+            <h1><img class="header-badge" src="icons/trophy.svg" alt="" /> Your Journey</h1>
+            <p>
+                @if (!string.IsNullOrWhiteSpace(Game.State.Username))
+                {
+                    <text>@Game.State.Username's progress so far.</text>
+                }
+                else
+                {
+                    <text>Start questing to see your stats here.</text>
+                }
+            </p>
+        </header>
+
+        <div class="stats-summary-grid">
+            <div class="stats-card">
+                <img class="stats-card-icon" src="icons/gem.svg" alt="" />
+                <div class="stats-card-value">@Game.State.Points</div>
+                <div class="stats-card-label">Points</div>
+            </div>
+            <div class="stats-card">
+                <img class="stats-card-icon" src="icons/flame.svg" alt="" />
+                <div class="stats-card-value">@Game.State.Streak</div>
+                <div class="stats-card-label">Current Streak</div>
+            </div>
+            <div class="stats-card">
+                <img class="stats-card-icon" src="icons/star.svg" alt="" />
+                <div class="stats-card-value">@Game.State.MaxStreak</div>
+                <div class="stats-card-label">Best Streak</div>
+            </div>
+            <div class="stats-card">
+                <img class="stats-card-icon" src="icons/calendar.svg" alt="" />
+                <div class="stats-card-value">@Game.State.CurrentDayStreak</div>
+                <div class="stats-card-label">Day Streak</div>
+            </div>
+            <div class="stats-card">
+                <img class="stats-card-icon" src="icons/check-badge.svg" alt="" />
+                <div class="stats-card-value">@TasksCompleted/@TotalTasks</div>
+                <div class="stats-card-label">Tasks Completed</div>
+            </div>
+            <div class="stats-card">
+                <img class="stats-card-icon" src="icons/target.svg" alt="" />
+                <div class="stats-card-value">@LevelsCompleted/@Levels.Count</div>
+                <div class="stats-card-label">Levels Completed</div>
+            </div>
+            <div class="stats-card">
+                <img class="stats-card-icon" src="icons/brain.svg" alt="" />
+                <div class="stats-card-value">@QuizzesPassed/@TotalQuizzes</div>
+                <div class="stats-card-label">Quizzes Passed</div>
+            </div>
+        </div>
+
+        <section class="stats-section">
+            <h2>How You Play</h2>
+            <div class="stats-summary-grid stats-summary-grid-secondary">
+                <div class="stats-card stats-card-small">
+                    <div class="stats-card-value">@Game.State.NoHintCompletions</div>
+                    <div class="stats-card-label">Solved with no hints</div>
+                </div>
+                <div class="stats-card stats-card-small">
+                    <div class="stats-card-value">@HintedCompletions</div>
+                    <div class="stats-card-label">Used at least one hint</div>
+                </div>
+                <div class="stats-card stats-card-small">
+                    <div class="stats-card-value">@Game.State.ComebackCompletions</div>
+                    <div class="stats-card-label">Comeback wins after the solution hint</div>
+                </div>
+                <div class="stats-card stats-card-small">
+                    <div class="stats-card-value">@Game.State.PlayedVisualTasks.Count</div>
+                    <div class="stats-card-label">Visual tasks replayed</div>
+                </div>
+                <div class="stats-card stats-card-small">
+                    <div class="stats-card-value">@Game.State.DaysPlayed.Count</div>
+                    <div class="stats-card-label">Days played</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="stats-section">
+            <h2>Level Progress</h2>
+            <div class="stats-level-list">
+                @foreach (var level in LevelProgressRows)
+                {
+                    var completed = level.Tasks.Count(t => Game.IsTaskCompleted(level.Id, t.Id));
+                    var total = level.Tasks.Count;
+                    var pct = total == 0 ? 0 : (int)Math.Round(100.0 * completed / total);
+                    var quizzesTotal = level.QuizStagesOrEmpty.Count;
+                    var quizzesDone = level.QuizStagesOrEmpty.Count(q => Game.IsQuizPassed(level.Id, q.AfterTaskId));
+                    var isCurrent = level.Id == CurrentLevelId;
+
+                    <div class="stats-level-row @(isCurrent ? "current" : "")">
+                        <div class="stats-level-name">
+                            @if (completed == total && total > 0)
+                            {
+                                <img class="inline-icon" src="icons/check-badge.svg" alt="" />
+                            }
+                            else if (isCurrent)
+                            {
+                                <img class="inline-icon" src="icons/target.svg" alt="" />
+                            }
+                            Level @level.Id &bull; @level.Name
+                            @if (isCurrent)
+                            {
+                                <span class="stats-level-current-badge">Playing now</span>
+                            }
+                        </div>
+                        <div class="stats-level-bar-track">
+                            <div class="stats-level-bar-fill" style="width: @(pct)%"></div>
+                        </div>
+                        <div class="stats-level-numbers">@completed/@total tasks @(quizzesTotal > 0 ? $"· {quizzesDone}/{quizzesTotal} quizzes" : "")</div>
+                    </div>
+                }
+            </div>
+            <button class="btn-secondary btn-small stats-level-expand-btn" @onclick="() => LevelProgressExpanded = !LevelProgressExpanded">
+                @(LevelProgressExpanded ? "▲ Show current level only" : $"▼ Show all {Levels.Count} levels")
+            </button>
+        </section>
+
+        <section class="stats-section">
+            <h2>Achievements (@UnlockedCount/@Achievements.All.Count)</h2>
+            <div class="stats-achievement-grid">
+                @foreach (var achievement in AchievementRows)
+                {
+                    var unlocked = Game.State.UnlockedAchievements.Contains(achievement.Id);
+                    <div class="stats-achievement @(unlocked ? "unlocked" : "locked")">
+                        <div class="stats-achievement-icon">@achievement.Icon</div>
+                        <div class="stats-achievement-title">@achievement.Title</div>
+                        <div class="stats-achievement-desc">@achievement.Description</div>
+                    </div>
+                }
+            </div>
+            @if (Achievements.All.Count > AchievementPreviewCount)
+            {
+                <button class="btn-secondary btn-small stats-level-expand-btn" @onclick="() => AchievementsExpanded = !AchievementsExpanded">
+                    @(AchievementsExpanded ? "▲ Show fewer" : $"▼ Show all {Achievements.All.Count} achievements")
+                </button>
+            }
+        </section>
+
+        <section class="stats-section">
+            <h2>Backup &amp; Restore</h2>
+            <p class="stats-section-hint">
+                Progress lives only in this browser — there's no account or server behind it.
+                To bring it to another device (or back after clearing your browser), export a
+                code here and import it there.
+            </p>
+
+            <div class="stats-backup-grid">
+                <div class="stats-backup-card">
+                    <h3>Export</h3>
+                    <p>Generates a code for your current progress. Copy it somewhere safe.</p>
+                    <button class="btn-secondary" @onclick="GenerateExportToken">Generate Code</button>
+                    @if (!string.IsNullOrEmpty(ExportToken))
+                    {
+                        <textarea class="stats-token-box" readonly @onclick="CopyExportTokenAsync">@ExportToken</textarea>
+                        @if (ExportCopied)
+                        {
+                            <div class="stats-inline-note success">Copied to clipboard!</div>
+                        }
+                        else
+                        {
+                            <div class="stats-inline-note">Tap the code to copy it.</div>
+                        }
+                    }
+                </div>
+
+                <div class="stats-backup-card">
+                    <h3>Restore</h3>
+                    <p>Paste a code exported from another device, and confirm the username it belongs to.</p>
+                    <textarea class="stats-token-box stats-token-input" placeholder="Paste your code here"
+                              @bind="ImportToken" @bind:event="oninput"></textarea>
+                    <input class="username-input stats-username-confirm" placeholder="Username on that code"
+                           @bind="ImportUsername" @bind:event="oninput" />
+                    <button class="btn-primary"
+                            disabled="@(string.IsNullOrWhiteSpace(ImportToken) || string.IsNullOrWhiteSpace(ImportUsername))"
+                            @onclick="RestoreAsync">
+                        Restore Progress
+                    </button>
+                    @if (ImportMessage is not null)
+                    {
+                        <div class="stats-inline-note @(ImportSucceeded ? "success" : "error")">@ImportMessage</div>
+                    }
+                </div>
+
+                <div class="stats-backup-card stats-backup-card-danger">
+                    <h3>Start Fresh</h3>
+                    <p>
+                        Wipes this browser's save and shows the username prompt again — for a new
+                        player on this device, or to start over yourself. Export a code above
+                        first if you want a way back to this progress; it isn't affected on
+                        Clarity either way.
+                    </p>
+                    @if (!ConfirmingReset)
+                    {
+                        <button class="btn-secondary" @onclick="() => ConfirmingReset = true">Reset Progress</button>
+                    }
+                    else
+                    {
+                        <div class="stats-reset-confirm">
+                            <p class="stats-inline-note error">This can't be undone on this device. Continue?</p>
+                            <div class="stats-reset-confirm-actions">
+                                <button class="btn-primary" @onclick="ResetAsync">Yes, start fresh</button>
+                                <button class="btn-secondary" @onclick="() => ConfirmingReset = false">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private bool IsLoaded;
+    private bool LevelProgressExpanded;
+    private bool AchievementsExpanded;
+    private string? ExportToken;
+    private bool ExportCopied;
+    private string ImportToken = "";
+    private string ImportUsername = "";
+    private string? ImportMessage;
+    private bool ImportSucceeded;
+    private bool ConfirmingReset;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Game.LoadAsync();
+        IsLoaded = true;
+    }
+
+    private IReadOnlyList<Level> Levels => AllLevels.Levels;
+
+    // The level the player would land on next — first one that isn't fully
+    // complete yet — highlighted in the Level Progress list below so it reads
+    // as "here's where you are," not just a flat list.
+    private int? CurrentLevelId => Levels.FirstOrDefault(l => !Game.IsLevelComplete(l))?.Id;
+
+    // Collapsed by default to just the level the player would resume at (or
+    // the last level, if every level is already complete) — the expand
+    // button reveals the full list so a returning player sees "here's where
+    // you are" first instead of scrolling past 12 rows to reach Achievements.
+    private IEnumerable<Level> LevelProgressRows =>
+        LevelProgressExpanded ? Levels : [Levels.FirstOrDefault(l => l.Id == CurrentLevelId) ?? Levels[^1]];
+
+    // Collapsed by default to 5 unlocked + 5 still-locked achievements (10
+    // total) instead of every single one, so this section doesn't force
+    // endless scrolling past dozens of rows — the expand button reveals the
+    // rest. Unlocked-first within each half so a returning player's most
+    // recent wins are easy to spot without expanding.
+    private const int AchievementPreviewCount = 5;
+    private IEnumerable<Achievement> AchievementRows
+    {
+        get
+        {
+            if (AchievementsExpanded) return Achievements.All;
+            var unlocked = Achievements.All.Where(a => Game.State.UnlockedAchievements.Contains(a.Id));
+            var locked = Achievements.All.Where(a => !Game.State.UnlockedAchievements.Contains(a.Id));
+            return unlocked.Take(AchievementPreviewCount).Concat(locked.Take(AchievementPreviewCount));
+        }
+    }
+
+    private int TotalTasks => Levels.Sum(l => l.Tasks.Count);
+    private int TasksCompleted => Game.State.Tasks.Values.Count(t => t.Completed);
+    private int LevelsCompleted => Levels.Count(Game.IsLevelComplete);
+    private int TotalQuizzes => Levels.Sum(l => l.QuizStagesOrEmpty.Count);
+    private int QuizzesPassed => Levels.Sum(l => l.QuizStagesOrEmpty.Count(q => Game.IsQuizPassed(l.Id, q.AfterTaskId)));
+    private int UnlockedCount => Achievements.All.Count(a => Game.State.UnlockedAchievements.Contains(a.Id));
+    private int HintedCompletions => Game.State.Tasks.Values.Count(t => t.Completed && t.HintsRevealed > 0);
+
+    private void GenerateExportToken()
+    {
+        ExportToken = Game.ExportState();
+        ExportCopied = false;
+    }
+
+    private async Task CopyExportTokenAsync()
+    {
+        if (ExportToken is null) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", ExportToken);
+            ExportCopied = true;
+        }
+        catch
+        {
+            // Clipboard API unavailable — the textarea's own text is still selectable.
+        }
+    }
+
+    private async Task RestoreAsync()
+    {
+        var result = await Game.ImportStateAsync(ImportToken, ImportUsername);
+        ImportSucceeded = result == GameStateService.ImportResult.Success;
+        ImportMessage = result switch
+        {
+            GameStateService.ImportResult.Success => "Restored! Your progress from that code is now active here.",
+            GameStateService.ImportResult.UsernameMismatch => "That username doesn't match the code — double check both and try again.",
+            _ => "That code doesn't look valid — make sure you copied the whole thing.",
+        };
+    }
+
+    private async Task ResetAsync()
+    {
+        await Game.ResetAsync();
+        // Force a full reload (not just an in-app route change) so every
+        // page's in-memory state re-initializes from the wiped save —
+        // otherwise Home.razor's already-rendered fields (CurrentLevelId,
+        // cached task lists, etc.) would keep referencing the old session.
+        Nav.NavigateTo("", forceLoad: true);
+    }
+}

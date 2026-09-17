@@ -1,0 +1,19 @@
+# .NET build output
+bin/
+obj/
+
+# Generated at build time by app.csproj's CopyRoslynReferenceAssemblies /
+# CopyOwnAssemblyForRoslyn targets (copies from the SDK's runtime pack + our
+# own compiled output) — regenerated automatically on every build/publish.
+app/wwwroot/roslyn-refs/
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+# OS
+.DS_Store
+
+# Claude Code local config (not for public repo)
+.claude/
