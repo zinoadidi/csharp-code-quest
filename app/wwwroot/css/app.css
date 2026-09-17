@@ -176,6 +176,9 @@ body {
     body {
         animation: none;
     }
+    .flashcard-shake {
+        animation: none;
+    }
 }
 
 @keyframes body-glow-shift {
@@ -576,6 +579,17 @@ code {
     aspect-ratio: 4 / 3;
     perspective: 1400px;
     cursor: pointer;
+}
+
+.flashcard-shake {
+    animation: flashcard-shake 0.5s ease;
+}
+
+@keyframes flashcard-shake {
+    10%, 90% { transform: translateX(-1px); }
+    20%, 80% { transform: translateX(2px); }
+    30%, 50%, 70% { transform: translateX(-4px); }
+    40%, 60% { transform: translateX(4px); }
 }
 
 .flashcard-inner {

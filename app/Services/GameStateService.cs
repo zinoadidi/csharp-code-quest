@@ -371,13 +371,27 @@ public sealed class GameStateService(IJSRuntime js)
     public QuizStage? PendingQuizAfter(Level level, int afterTaskId) =>
         level.QuizStagesOrEmpty.FirstOrDefault(q => q.AfterTaskId == afterTaskId && !IsQuizPassed(level.Id, afterTaskId));
 
-    public async Task RecordQuizPassedAsync(int levelId, int afterTaskId)
+    /// <summary>
+    /// Passing a quiz stage can itself unlock an achievement (e.g. quiz-whiz,
+    /// quiz-master), so this checks for new achievements the same way
+    /// RecordAttemptAsync does — otherwise those unlocks would sit undetected
+    /// in UnlockedAchievements until some later, unrelated task completion
+    /// happened to run CheckNewAchievements, showing the popup at the wrong
+    /// moment (or never, if the quiz was the player's last action).
+    /// </summary>
+    public async Task<IReadOnlyList<Achievement>> RecordQuizPassedAsync(int levelId, int afterTaskId, IReadOnlyList<Level> levels)
     {
         if (State.PassedQuizzes.Add(GameState.QuizKey(levelId, afterTaskId)))
         {
             await SaveAsync();
         }
         await TrackClarityEventAsync("quiz_passed", ("level", levelId.ToString()), ("quiz", afterTaskId.ToString()));
+        var newAchievements = CheckNewAchievements(levels);
+        if (newAchievements.Count > 0)
+        {
+            await SaveAsync();
+        }
+        return newAchievements;
     }
 
     /// <summary>

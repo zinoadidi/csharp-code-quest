@@ -165,7 +165,7 @@
                         <span>Level @CurrentLevelId &bull; Quick Concepts (@(FlashcardIndex + 1)/@cards.Count)</span>
                         <span class="task-points"><img class="inline-icon" src="icons/gem.svg" alt="" /> +@task.Points points</span>
                     </div>
-                    <div class="flashcard @(FlashcardFlipped ? "flipped" : "")" @onclick="FlipFlashcard" @key="FlashcardIndex">
+                    <div class="flashcard @(FlashcardFlipped ? "flipped" : "") @(FlashcardShaking ? "flashcard-shake" : "")" @onclick="FlipFlashcard" @key="FlashcardIndex">
                         <div class="flashcard-inner">
                             <div class="flashcard-face flashcard-front">
                                 <div class="flashcard-icon">💡</div>
@@ -374,6 +374,9 @@
     private Action? _afterQuiz;
     private bool FlashcardFlipped;
     private int FlashcardIndex;
+    private int _flashcardsSeenInDeck;
+    private bool FlashcardShaking;
+    private int _flashcardShakeToken;
 
     private Level? CurrentLevel => CurrentLevelId is int id ? Levels.FirstOrDefault(l => l.Id == id) : null;
     private GameTask? CurrentTask => CurrentLevel?.Tasks.FirstOrDefault(t => t.Id == CurrentTaskId);
@@ -533,14 +536,39 @@
         LastCanvasCommands = [];
         FlashcardFlipped = false;
         FlashcardIndex = 0;
+        _flashcardsSeenInDeck = 0;
+        FlashcardShaking = false;
         EditorCode = CurrentTask?.StarterCode ?? "";
     }
+
+    private const int FlashcardShakeEveryNth = 3;
 
     private void FlipFlashcard()
     {
         if (FlashcardFlipped) return;
         FlashcardFlipped = true;
-        _ = Game.PlaySoundAsync(SoundEffect.Navigate);
+        _flashcardsSeenInDeck++;
+
+        if (_flashcardsSeenInDeck % FlashcardShakeEveryNth == 0)
+        {
+            FlashcardShaking = true;
+            _ = Game.PlaySoundAsync(SoundEffect.FlashcardStreak);
+            _ = ClearFlashcardShakeAsync(++_flashcardShakeToken);
+        }
+        else
+        {
+            _ = Game.PlaySoundAsync(SoundEffect.Navigate);
+        }
+    }
+
+    private async Task ClearFlashcardShakeAsync(int token)
+    {
+        await Task.Delay(500);
+        if (_flashcardShakeToken == token)
+        {
+            FlashcardShaking = false;
+            StateHasChanged();
+        }
     }
 
     private void NextFlashcard()
@@ -883,7 +911,8 @@
         var stage = level.QuizStagesOrEmpty.FirstOrDefault(q => q.AfterTaskId == justCompletedTaskId);
         if (stage is not null && !Game.IsQuizPassed(level.Id, stage.AfterTaskId))
         {
-            await Game.RecordQuizPassedAsync(level.Id, stage.AfterTaskId);
+            var newAchievements = await Game.RecordQuizPassedAsync(level.Id, stage.AfterTaskId, Levels);
+            EnqueueAchievements(newAchievements);
         }
     }
 
@@ -993,7 +1022,8 @@
     {
         if (CurrentLevelId is int levelId && ActiveQuiz is not null)
         {
-            await Game.RecordQuizPassedAsync(levelId, ActiveQuiz.AfterTaskId);
+            var newAchievements = await Game.RecordQuizPassedAsync(levelId, ActiveQuiz.AfterTaskId, Levels);
+            EnqueueAchievements(newAchievements);
         }
 
         await Game.PlaySoundAsync(SoundEffect.QuizPass);

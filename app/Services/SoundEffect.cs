@@ -24,4 +24,5 @@ public static class SoundEffect
     public const string QuizIncorrect = "quizIncorrect";
     public const string QuizPass = "quizPass";
     public const string QuizFail = "quizFail";
+    public const string FlashcardStreak = "flashcardStreak";
 }

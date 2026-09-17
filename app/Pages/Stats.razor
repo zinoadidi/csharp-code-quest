@@ -163,6 +163,18 @@ else
         </section>
 
         <section class="stats-section">
+            <h2>App Updates</h2>
+            <p class="stats-section-hint">
+                If you've installed this as an app, it can keep showing an older version even
+                after new levels or fixes go live. Tap below to grab the latest version — your
+                points, streak, and progress stay exactly as they are.
+            </p>
+            <button class="btn-secondary" @onclick="CheckForUpdateAsync" disabled="@IsCheckingForUpdate">
+                @(IsCheckingForUpdate ? "Getting latest version…" : "🔄 Get Latest Version")
+            </button>
+        </section>
+
+        <section class="stats-section">
             <h2>Backup &amp; Restore</h2>
             <p class="stats-section-hint">
                 Progress lives only in this browser — there's no account or server behind it.
@@ -246,6 +258,7 @@ else
     private string? ImportMessage;
     private bool ImportSucceeded;
     private bool ConfirmingReset;
+    private bool IsCheckingForUpdate;
 
     protected override async Task OnInitializedAsync()
     {
@@ -322,6 +335,18 @@ else
             GameStateService.ImportResult.UsernameMismatch => "That username doesn't match the code — double check both and try again.",
             _ => "That code doesn't look valid — make sure you copied the whole thing.",
         };
+    }
+
+    // Blazor's service worker only swaps in a newly-fetched build once every
+    // tab of the site has been closed, so an installed/pinned player can be
+    // stuck on a stale cached version indefinitely. This unregisters the
+    // service worker and clears its Cache Storage (js/appUpdate.js), then
+    // reloads — GameState lives in localStorage, which none of that touches,
+    // so progress survives untouched.
+    private async Task CheckForUpdateAsync()
+    {
+        IsCheckingForUpdate = true;
+        await JS.InvokeVoidAsync("appUpdate.forceRefresh");
     }
 
     private async Task ResetAsync()

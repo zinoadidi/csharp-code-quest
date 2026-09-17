@@ -77,6 +77,14 @@ window.sfx = (function () {
             tone(c, 293.66, 0, 0.12, "sine", 0.14);
             tone(c, 246.94, 0.1, 0.22, "sine", 0.14);
         },
+        // Every 3rd flashcard seen in a deck — a playful little "wobble" to
+        // go with the card-shake animation, distinct from the plain flip
+        // click (navigate) so a run of cards doesn't feel monotonous.
+        flashcardStreak: (c) => {
+            tone(c, 587.33, 0, 0.07, "square", 0.12);
+            tone(c, 493.88, 0.05, 0.07, "square", 0.12);
+            tone(c, 659.25, 0.1, 0.1, "square", 0.14);
+        },
         achievement: (c) => {
             tone(c, 659.25, 0, 0.1, "square", 0.12);
             tone(c, 880, 0.09, 0.1, "square", 0.12);
