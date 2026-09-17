@@ -176,7 +176,11 @@ body {
     body {
         animation: none;
     }
-    .flashcard-shake {
+    .flashcard-shake,
+    .cert-card-celebrate,
+    .stats-achievement.unlocked.recent,
+    .quiz-option.correct,
+    .quiz-option.incorrect {
         animation: none;
     }
 }
@@ -1059,6 +1063,20 @@ code {
     transform: translateY(0) scale(0.96);
 }
 
+.btn-primary,
+.btn-secondary,
+.btn-hint,
+.btn-next {
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.btn-primary:active:not(:disabled),
+.btn-secondary:active:not(:disabled),
+.btn-hint:active:not(:disabled),
+.btn-next:active:not(:disabled) {
+    transform: scale(0.96);
+}
+
 .btn-primary {
     background: linear-gradient(90deg, #7dd3fc, #a78bfa);
     background-size: 200% 100%;
@@ -1217,11 +1235,13 @@ code {
 .quiz-option.correct {
     border-color: var(--accent-green);
     background: rgba(74, 222, 128, 0.18);
+    animation: success-pop 0.3s ease;
 }
 
 .quiz-option.incorrect {
     border-color: var(--accent-pink);
     background: rgba(244, 63, 94, 0.18);
+    animation: flashcard-shake 0.3s ease;
 }
 
 .quiz-next-btn {
@@ -1908,6 +1928,15 @@ code {
     border-color: rgba(167, 139, 250, 0.4);
 }
 
+.stats-achievement.unlocked.recent {
+    animation: achievement-glow-pulse 1.4s ease-out;
+}
+
+@keyframes achievement-glow-pulse {
+    0% { box-shadow: 0 0 0 6px rgba(167, 139, 250, 0.45); }
+    100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0); }
+}
+
 .stats-achievement.locked {
     background: rgba(var(--surface-rgb), 0.03);
     opacity: 0.45;
@@ -2059,6 +2088,10 @@ code {
     border-radius: 1.25rem;
     padding: 0.6rem;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.cert-card-celebrate {
+    animation: celebration-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .cert-border {

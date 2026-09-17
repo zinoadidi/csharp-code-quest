@@ -37,7 +37,7 @@ else
             <div class="stats-inline-note success no-print">@ShareMessage</div>
         }
 
-        <div class="cert-card" id="certificate-card">
+        <div class="cert-card @(IsCelebrating ? "cert-card-celebrate" : "")" id="certificate-card">
             <div class="cert-border">
                 <img class="cert-badge" src="icons/trophy.svg" alt="" />
                 <div class="cert-kicker">Certificate of Completion</div>
@@ -85,11 +85,18 @@ else
 @code {
     private bool IsLoaded;
     private string? ShareMessage;
+    private bool IsCelebrating;
 
     protected override async Task OnInitializedAsync()
     {
         await Game.LoadAsync();
         IsLoaded = true;
+
+        if (await Game.TryBeginCertificateCelebrationAsync())
+        {
+            IsCelebrating = true;
+            await Game.PlaySoundAsync(SoundEffect.QuestComplete);
+        }
     }
 
     private IReadOnlyList<Level> Levels => AllLevels.Levels;

@@ -589,6 +589,13 @@ public sealed class GameStateService(IJSRuntime js)
         return new PlayResult(pointsAwarded, newAchievements);
     }
 
+    // Achievements unlocked THIS session (in-memory only, never persisted —
+    // resets on reload) — Stats.razor uses this to give a just-unlocked
+    // achievement a one-shot glow when the player browses the grid, instead
+    // of it looking identical to one earned weeks ago.
+    public IReadOnlySet<string> RecentlyUnlockedAchievements => _recentlyUnlockedAchievements;
+    private readonly HashSet<string> _recentlyUnlockedAchievements = new();
+
     private List<Achievement> CheckNewAchievements(IReadOnlyList<Level> levels)
     {
         var newAchievements = new List<Achievement>();
@@ -597,10 +604,25 @@ public sealed class GameStateService(IJSRuntime js)
             if (!State.UnlockedAchievements.Contains(achievement.Id) && achievement.IsUnlocked(State, levels))
             {
                 State.UnlockedAchievements.Add(achievement.Id);
+                _recentlyUnlockedAchievements.Add(achievement.Id);
                 newAchievements.Add(achievement);
                 _ = TrackClarityEventAsync("achievement_unlocked", ("achievement", achievement.Id));
             }
         }
         return newAchievements;
+    }
+
+    /// <summary>
+    /// True only the first time this is called after the quest is complete —
+    /// Certificate.razor uses it to play a one-time entrance celebration on
+    /// first seeing the finished certificate, without repeating it on every
+    /// later visit/reload.
+    /// </summary>
+    public async Task<bool> TryBeginCertificateCelebrationAsync()
+    {
+        if (State.CompletedAt is null || State.CertificateCelebrated) return false;
+        State.CertificateCelebrated = true;
+        await SaveAsync();
+        return true;
     }
 }

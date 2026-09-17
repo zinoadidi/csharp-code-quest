@@ -147,7 +147,8 @@ else
                 @foreach (var achievement in AchievementRows)
                 {
                     var unlocked = Game.State.UnlockedAchievements.Contains(achievement.Id);
-                    <div class="stats-achievement @(unlocked ? "unlocked" : "locked")">
+                    var recent = unlocked && Game.RecentlyUnlockedAchievements.Contains(achievement.Id);
+                    <div class="stats-achievement @(unlocked ? "unlocked" : "locked") @(recent ? "recent" : "")">
                         <div class="stats-achievement-icon">@achievement.Icon</div>
                         <div class="stats-achievement-title">@achievement.Title</div>
                         <div class="stats-achievement-desc">@achievement.Description</div>

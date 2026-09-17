@@ -85,6 +85,12 @@ public sealed class GameState
     public int CurrentDayStreak { get; set; }
     public int MaxDayStreak { get; set; }
 
+    // Set once, the first time Pages/Certificate.razor is viewed after
+    // CompletedAt is set — lets that page play a one-time entrance
+    // celebration on the actual moment of first seeing the finished
+    // certificate, without repeating it on every later visit/reload.
+    public bool CertificateCelebrated { get; set; }
+
     public static string TaskKey(int levelId, int taskId) => $"{levelId}-{taskId}";
     public static string QuizKey(int levelId, int afterTaskId) => $"{levelId}-quiz-{afterTaskId}";
 }

@@ -68,14 +68,43 @@ window.sfx = (function () {
         quizIncorrect: (c) => {
             tone(c, 233.08, 0, 0.14, "sawtooth", 0.08);
         },
-        // A whole quiz stage passed / failed (end of the card set).
+        // A whole quiz stage passed (end of the card set) — a proper little
+        // fanfare (longer than the old two-note version) since clearing a
+        // whole quiz gates real progress, not just one card. Sits between
+        // quizCorrect (tiny, per-card) and levelComplete (biggest, per-level)
+        // in both length and weight.
         quizPass: (c) => {
-            tone(c, 587.33, 0, 0.12, "triangle", 0.16);
-            tone(c, 880, 0.1, 0.2, "triangle", 0.16);
+            tone(c, 523.25, 0, 0.11, "triangle", 0.15);
+            tone(c, 587.33, 0.09, 0.11, "triangle", 0.15);
+            tone(c, 783.99, 0.18, 0.14, "triangle", 0.17);
+            tone(c, 1046.5, 0.32, 0.45, "triangle", 0.2);
+            tone(c, 1318.51, 0.32, 0.45, "triangle", 0.14);
         },
         quizFail: (c) => {
             tone(c, 293.66, 0, 0.12, "sine", 0.14);
             tone(c, 246.94, 0.1, 0.22, "sine", 0.14);
+        },
+        // Finishing a WHOLE flashcard deck (the last "Got it!") — like
+        // quizPass, this is a whole set finished, not just one card, so it
+        // gets more than the plain taskComplete ding: a brighter little
+        // run-up into a two-note landing.
+        deckComplete: (c) => {
+            tone(c, 587.33, 0, 0.1, "triangle", 0.14);
+            tone(c, 739.99, 0.08, 0.1, "triangle", 0.14);
+            tone(c, 932.33, 0.16, 0.35, "triangle", 0.17);
+            tone(c, 1174.66, 0.16, 0.35, "triangle", 0.12);
+        },
+        // Revealing a hint tier — quiet, single tone so it doesn't compete
+        // with taskComplete/quizCorrect.
+        hintRevealed: (c) => {
+            tone(c, 466.16, 0, 0.09, "sine", 0.08);
+        },
+        // Revealing the FULL SOLUTION tier specifically — a bit bigger than a
+        // regular hint (two notes instead of one) since it's the last, biggest
+        // hint moment, but still well under taskComplete/achievement in weight.
+        solutionRevealed: (c) => {
+            tone(c, 523.25, 0, 0.1, "triangle", 0.12);
+            tone(c, 698.46, 0.08, 0.16, "triangle", 0.12);
         },
         achievement: (c) => {
             tone(c, 659.25, 0, 0.1, "square", 0.12);

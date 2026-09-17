@@ -594,7 +594,10 @@
 
         if (attempt.PointsAwarded > 0)
         {
-            await Game.PlaySoundAsync(SoundEffect.TaskComplete);
+            // Finishing the whole deck (this is the LAST card's "Got it!") is
+            // a bigger moment than any other single task — reuse the same
+            // longer fanfare quizPass gets, instead of the quick generic ding.
+            await Game.PlaySoundAsync(SoundEffect.DeckComplete);
         }
 
         EnqueueAchievements(attempt.NewAchievements);
@@ -927,6 +930,7 @@
         if (task is null || CurrentLevelId is not int levelId) return;
 
         CanvasReplayToken++;
+        await Game.PlaySoundAsync(SoundEffect.LevelOpen);
 
         var play = await Game.RecordVisualPlayAsync(levelId, task, Levels);
         EnqueueAchievements(play.NewAchievements);
@@ -936,7 +940,9 @@
     {
         var task = CurrentTask;
         if (task is null || CurrentLevelId is not int levelId) return;
-        await Game.RevealNextHintAsync(levelId, task);
+        var newCount = await Game.RevealNextHintAsync(levelId, task);
+        var revealedSolution = newCount > 0 && task.Hints[newCount - 1].IsSolution;
+        await Game.PlaySoundAsync(revealedSolution ? SoundEffect.SolutionRevealed : SoundEffect.HintRevealed);
     }
 
     // No one-click "Copy solution" button anymore (removed deliberately — see
@@ -963,6 +969,7 @@
         }
 
         await OnSolutionCopiedAsync(taskId);
+        await Game.PlaySoundAsync(SoundEffect.Navigate);
 
         _copiedTaskId = taskId;
         StateHasChanged();
