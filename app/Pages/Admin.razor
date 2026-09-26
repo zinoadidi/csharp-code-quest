@@ -98,22 +98,29 @@ else
                                 }
                                 else
                                 {
-                                    <ul class="admin-events">
-                                        @foreach (var e in row.Events)
-                                        {
-                                            <li>
-                                                <span class="admin-event-name">@e.Name</span>
-                                                <span class="stats-section-hint">@e.At.ToLocalTime().ToString("g")</span>
-                                                @if (e.Tags is not null)
-                                                {
-                                                    foreach (var kv in e.Tags)
+                                    foreach (var day in GroupByDay(row.Events))
+                                    {
+                                        <div class="admin-day">@day.Label</div>
+                                        <ul class="admin-events">
+                                            @foreach (var e in day.Items)
+                                            {
+                                                <li title="@e.At.ToLocalTime().ToString("f")">
+                                                    <div class="admin-event-main">
+                                                        <span class="admin-event-name">@EventTitle(e)</span>
+                                                        <span class="stats-section-hint">@RelativeTime(e.At)</span>
+                                                    </div>
+                                                    @if (EventDetail(e) is { } detail)
                                                     {
-                                                        <span class="stats-section-hint">@kv.Key=@kv.Value</span>
+                                                        <div class="stats-section-hint">@detail</div>
                                                     }
-                                                }
-                                            </li>
-                                        }
-                                    </ul>
+                                                    @foreach (var chip in AchievementChips(e))
+                                                    {
+                                                        <span class="admin-chip">@chip</span>
+                                                    }
+                                                </li>
+                                            }
+                                        </ul>
+                                    }
                                 }
                             </td>
                         </tr>
@@ -134,9 +141,12 @@ else
     .admin-num { text-align: right; font-variant-numeric: tabular-nums; }
     .admin-name { font-weight: 600; }
     tr.admin-demo td { opacity: 0.75; }
-    .admin-events { list-style: none; margin: 0.25rem 0; padding: 0; font-size: 0.85rem; }
-    .admin-events li { padding: 0.2rem 0; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+    .admin-events { list-style: none; margin: 0 0 0.75rem; padding: 0; font-size: 0.85rem; }
+    .admin-events li { padding: 0.3rem 0; border-bottom: 1px dotted rgba(128, 128, 128, 0.25); }
+    .admin-day { font-weight: 700; font-size: 0.8rem; margin-top: 0.6rem; opacity: 0.8; }
+    .admin-event-main { display: flex; gap: 0.6rem; justify-content: space-between; align-items: baseline; }
     .admin-event-name { font-weight: 600; }
+    .admin-chip { display: inline-block; margin: 0.15rem 0.25rem 0 0; padding: 0.1rem 0.5rem; border: 1px solid rgba(128, 128, 128, 0.4); border-radius: 999px; font-size: 0.8rem; }
 </style>
 
 @code {
@@ -363,4 +373,117 @@ else
         DaysPlayed = g?.DaysPlayed.Count ?? 0,
         Completed = g?.CompletedAt is not null,
     };
+
+    private static string? Tag(QuestAccountService.ServerEvent e, string key) =>
+        e.Tags is not null && e.Tags.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
+
+    private static string LevelOf(QuestAccountService.ServerEvent e) =>
+        Tag(e, "level") is { } l ? $"Level {l}" : "a level";
+
+    private static string EventTitle(QuestAccountService.ServerEvent e) => e.Name switch
+    {
+        "session_started" => "Opened the app",
+        "registered" => "Created their account",
+        "logged_in" => "Signed in",
+        "migrated" => "Linked an existing save",
+        "restored" => "Restored progress here",
+        "task_completed" => $"Completed a task · {LevelOf(e)}",
+        "level_completed" => $"Finished {LevelOf(e)}",
+        "quest_completed" => "Finished the whole quest",
+        "quiz_passed" => $"Passed a quiz · {LevelOf(e)}",
+        "quiz_failed_attempt" => $"Quiz attempt · {LevelOf(e)}",
+        "hint_revealed" => $"Revealed a hint · {LevelOf(e)}",
+        "solution_hint_revealed" => $"Revealed the full solution · {LevelOf(e)}",
+        "solution_copied" => $"Copied the solution · {LevelOf(e)}",
+        "visual_played" => $"Replayed a visual task · {LevelOf(e)}",
+        "achievement_unlocked" => "Unlocked an achievement",
+        "level_backlog" => $"Earlier progress · {LevelOf(e)}",
+        "progress_backlog" => "Backfill — where they stood",
+        _ => e.Name,
+    };
+
+    private static string? EventDetail(QuestAccountService.ServerEvent e)
+    {
+        var task = Tag(e, "task");
+        var score = Tag(e, "score");
+        var tier = Tag(e, "hint_tier");
+        var points = Tag(e, "points");
+        return e.Name switch
+        {
+            "task_completed" or "solution_copied" or "visual_played" =>
+                task is null ? null : $"Task {task}",
+            "quiz_failed_attempt" => score is null ? null : $"Scored {score}",
+            "hint_revealed" or "solution_hint_revealed" =>
+                tier is null ? null : $"Tier {tier}",
+            "quest_completed" => points is null ? null : $"{points} points",
+            "progress_backlog" => string.Join(" · ", new[]
+                {
+                    Tag(e, "totalPoints") is { } p ? $"{p} pts" : null,
+                    Tag(e, "tasksCompleted") is { } t ? $"{t} tasks" : null,
+                    Tag(e, "levelsTouched") is { } l ? $"{l} levels" : null,
+                    Tag(e, "maxStreak") is { } s ? $"best streak {s}" : null,
+                    Tag(e, "daysPlayed") is { } d ? $"{d} days" : null,
+                    Tag(e, "earliestDay") is { } from && Tag(e, "daysCovered") is { } span
+                        ? $"spanning {span}d from {from}" : null,
+                    Tag(e, "startedAt") is { } st && DateTime.TryParse(st, out var sdt)
+                        ? $"started {sdt:dd MMM yyyy}" : null,
+                    Tag(e, "completedAt") is { } ct && DateTime.TryParse(ct, out var cdt)
+                        ? $"finished {cdt:dd MMM yyyy}" : null,
+                }.Where(x => x is not null)),
+            "level_backlog" => Tag(e, "tasksCompleted") is { } tc ? $"{tc} tasks" : null,
+            _ => null,
+        };
+    }
+
+    private static IEnumerable<string> AchievementChips(QuestAccountService.ServerEvent e)
+    {
+        var raw = e.Name == "achievement_unlocked" ? Tag(e, "achievement") : Tag(e, "achievements");
+        if (string.IsNullOrWhiteSpace(raw)) yield break;
+        foreach (var id in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var known = Achievements.All.FirstOrDefault(a =>
+                string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase));
+            yield return known is null ? Prettify(id) : $"{known.Icon} {known.Title}";
+        }
+    }
+
+    private static string Prettify(string id) =>
+        string.Join(' ', id.Split('-', StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
+
+    private static string RelativeTime(DateTime at)
+    {
+        var age = DateTime.UtcNow - at.ToUniversalTime();
+        if (age.TotalMinutes < 1) return "just now";
+        if (age.TotalHours < 1) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalDays < 1) return $"{(int)age.TotalHours}h ago";
+        if (age.TotalDays < 7) return $"{(int)age.TotalDays}d ago";
+        return at.ToLocalTime().ToString("dd MMM yyyy");
+    }
+
+    private static string DayLabel(DateTime day)
+    {
+        var today = DateTime.Today;
+        if (day == today) return "Today";
+        if (day == today.AddDays(-1)) return "Yesterday";
+        return day.ToString("dddd, dd MMM yyyy");
+    }
+
+    private static IEnumerable<(string Label, List<QuestAccountService.ServerEvent> Items)> GroupByDay(
+        List<QuestAccountService.ServerEvent> events)
+    {
+        var groups = new List<(string, List<QuestAccountService.ServerEvent>)>();
+        string? current = null;
+        foreach (var e in events)
+        {
+            var label = DayLabel(e.At.ToLocalTime().Date);
+            if (current != label)
+            {
+                groups.Add((label, new()));
+                current = label;
+            }
+            groups[^1].Item2.Add(e);
+        }
+        return groups;
+    }
 }
