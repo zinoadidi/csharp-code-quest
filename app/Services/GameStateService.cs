@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using app.Content;
 using Microsoft.JSInterop;
@@ -256,7 +257,11 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
     /// Computes the backfill payload from a local save: one summary event
     /// (totals, achievements, streaks, start/finish stamps) plus one
     /// per-level event for every level with completed tasks, so the server
-    /// log reflects where the player actually stands. Pure (no I/O) for
+    /// log reflects where the player actually stands. Events are dated
+    /// honestly rather than all stamped today: the player's recorded active
+    /// days first; failing that, the day streak (which proves the account is
+    /// at least that many days old) spread over the trailing days; only when
+    /// neither exists does everything land on today. Pure (no I/O) for
     /// testability.
     /// </summary>
     public static IReadOnlyList<QuestAccountService.ServerEvent> BuildBacklog(GameState state)
@@ -268,6 +273,33 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
             .GroupBy(l => l)
             .OrderBy(g => int.TryParse(g.Key, out var n) ? n : int.MaxValue)
             .ToList();
+
+        var activeDays = state.DaysPlayed
+            .Select(d => DateTime.TryParseExact(
+                d, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var dt) ? dt.Date : (DateTime?)null)
+            .Where(d => d.HasValue && d.Value <= now.Date)
+            .Select(d => d!.Value)
+            .Distinct()
+            .OrderBy(d => d)
+            .ToList();
+        List<DateTime> span = activeDays.Count > 0
+            ? activeDays
+            : state.MaxDayStreak > 0
+                ? Enumerable.Range(0, Math.Min(state.MaxDayStreak, 3650))
+                    .Select(n => now.Date.AddDays(-n))
+                    .OrderBy(d => d)
+                    .ToList()
+                : new List<DateTime> { now.Date };
+
+        // Spread level events across the span oldest-first; a single-day
+        // span keeps everything together.
+        DateTime AtForLevel(int index) =>
+            span.Count == 1 || perLevel.Count == 0
+                ? span[0]
+                : span[(int)((long)index * span.Count / perLevel.Count)];
+
         var tags = new Dictionary<string, string>
         {
             ["tasksCompleted"] = completed.Count.ToString(),
@@ -281,16 +313,19 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
             ["noHintCompletions"] = state.NoHintCompletions.ToString(),
             ["startedAt"] = state.StartedAt?.ToString("o") ?? "",
             ["completedAt"] = state.CompletedAt?.ToString("o") ?? "",
+            ["daysCovered"] = span.Count.ToString(),
+            ["earliestDay"] = span[0].ToString("yyyy-MM-dd"),
             ["backlogVersion"] = "1",
         };
         var events = new List<QuestAccountService.ServerEvent>
         {
-            new(QuestAccountService.BacklogMarker, now, tags),
+            new(QuestAccountService.BacklogMarker, span[^1], tags),
         };
+        var i = 0;
         events.AddRange(perLevel.Select(g =>
             new QuestAccountService.ServerEvent(
                 "level_backlog",
-                now,
+                AtForLevel(i++),
                 new Dictionary<string, string>
                 {
                     ["level"] = g.Key,
