@@ -1451,6 +1451,24 @@ code {
     padding: 0.75rem 1.1rem;
 }
 
+/* Auth mode tabs (New student / Returning / Demo) + status notes inside the
+   first-run and migration modals — reuses .btn-secondary/.stats-inline-note
+   so the modal keeps its existing look. */
+.username-actions.auth-tabs {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-bottom: 1rem;
+}
+
+.username-modal .stats-inline-note {
+    margin-top: 0.9rem;
+}
+
+.username-modal .username-actions + .username-actions {
+    margin-top: 0.75rem;
+}
+
 /* Gamified celebration popups (achievement unlocked, level complete) — shown
    dead-center of the screen for a couple of seconds instead of a quiet corner
    toast, with a dimmed backdrop so they read as a "moment" rather than a

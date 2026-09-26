@@ -4,26 +4,103 @@
 @using app.Services
 @inject CSharpRunner Runner
 @inject GameStateService Game
+@inject QuestAccountService Accounts
 @inject IJSRuntime JS
-@inject HttpClient Http
 @inject NavigationManager Nav
 
 <PageTitle>C# Code Quest</PageTitle>
 
-@if (IsLoaded && string.IsNullOrWhiteSpace(Game.State.Username) && !DemoArmed)
+@* First run: no local save yet. New students register with username +
+   school email (both unique server-wide); returning students log in with
+   either one and their progress loads onto this device. *@
+@if (IsLoaded && string.IsNullOrWhiteSpace(Game.State.Username) && !DemoArmed && !_offlinePlay)
 {
     <div class="username-overlay">
         <div class="username-modal panel">
             <img class="username-badge" src="icons/controller.svg" alt="" />
             <h2>Welcome, adventurer!</h2>
-            <p>What should we call you?</p>
+            <div class="username-actions auth-tabs">
+                <button class="btn-secondary btn-small" disabled="@(AuthMode == "new")" @onclick='() => SetAuthMode("new")'>New student</button>
+                <button class="btn-secondary btn-small" disabled="@(AuthMode == "return")" @onclick='() => SetAuthMode("return")'>Returning</button>
+            </div>
+            @if (AuthMode == "new")
+            {
+                <p>Pick a username and add your school email — your progress saves online, so it follows you to any device.</p>
+                <input class="username-input"
+                       @bind="RegUsername" @bind:event="oninput"
+                       @onkeydown="OnAuthKeyDown"
+                       maxlength="24"
+                       placeholder="Username" />
+                <input class="username-input"
+                       @bind="RegEmail" @bind:event="oninput"
+                       @onkeydown="OnAuthKeyDown"
+                       maxlength="254"
+                       placeholder="School email" />
+                <div class="username-actions">
+                    <button class="btn-primary" disabled="@(!CanRegister || AuthBusy)" @onclick="SubmitRegistrationAsync">
+                        @(AuthBusy ? "Creating account…" : "Start Questing →")
+                    </button>
+                </div>
+            }
+            else if (AuthMode == "return")
+            {
+                <p>Enter your username or school email to pull your progress onto this device.</p>
+                <input class="username-input"
+                       @bind="LoginId" @bind:event="oninput"
+                       @onkeydown="OnAuthKeyDown"
+                       maxlength="254"
+                       placeholder="Username or school email" />
+                <input class="username-input"
+                       @bind="LoginEmail" @bind:event="oninput"
+                       @onkeydown="OnAuthKeyDown"
+                       maxlength="254"
+                       placeholder="School email (only if your account lacks one)" />
+                <div class="username-actions">
+                    <button class="btn-primary" disabled="@(string.IsNullOrWhiteSpace(LoginId) || AuthBusy)" @onclick="SubmitLoginAsync">
+                        @(AuthBusy ? "Finding account…" : "Continue Questing →")
+                    </button>
+                </div>
+            }
+            @if (AuthMessage is not null)
+            {
+                <div class="stats-inline-note @(AuthSucceeded ? "success" : "error")">@AuthMessage</div>
+            }
+            @if (AuthOffline)
+            {
+                <div class="username-actions">
+                    <button class="btn-secondary" @onclick="PlayOfflineAsync">Play offline for now</button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@* Migration: a save from before the server integration (username, but no
+   linked account). One school email links it up — local progress is kept
+   and becomes the server's first copy. *@
+@if (IsLoaded && ShowMigration && !DemoArmed)
+{
+    <div class="username-overlay">
+        <div class="username-modal panel">
+            <img class="username-badge" src="icons/controller.svg" alt="" />
+            <h2>Keep @Game.State.Username's progress safe</h2>
+            <p>Progress now saves online. Add your school email once to link this device — nothing you've earned is lost.</p>
             <input class="username-input"
-                   @bind="UsernameDraft" @bind:event="oninput"
-                   @onkeydown="OnUsernameKeyDown"
-                   maxlength="24"
-                   placeholder="Your name" />
+                   @bind="MigrationEmail" @bind:event="oninput"
+                   @onkeydown="OnMigrationKeyDown"
+                   maxlength="254"
+                   placeholder="School email" />
             <div class="username-actions">
-                <button class="btn-primary" disabled="@string.IsNullOrWhiteSpace(UsernameDraft)" @onclick="SubmitUsernameAsync">Start Questing →</button>
+                <button class="btn-primary" disabled="@(!CanMigrate || AuthBusy)" @onclick="SubmitMigrationAsync">
+                    @(AuthBusy ? "Linking…" : "Link My Progress →")
+                </button>
+            </div>
+            @if (AuthMessage is not null)
+            {
+                <div class="stats-inline-note @(AuthSucceeded ? "success" : "error")">@AuthMessage</div>
+            }
+            <div class="username-actions">
+                <button class="btn-secondary btn-small" @onclick="() => _migrationDismissed = true">Not now</button>
             </div>
         </div>
     </div>
@@ -393,8 +470,37 @@
     }
 
     private bool IsLoaded;
-    private string UsernameDraft = "";
     private bool DemoArmed;
+    private string AuthMode = "new";
+    private string RegUsername = "";
+    private string RegEmail = "";
+    private string LoginId = "";
+    private string LoginEmail = "";
+    private string MigrationEmail = "";
+    private string? AuthMessage;
+    private bool AuthSucceeded;
+    private bool AuthOffline;
+    private bool AuthBusy;
+    private bool _offlinePlay;
+    private bool _migrationDismissed;
+
+    private bool ShowMigration =>
+        !string.IsNullOrWhiteSpace(Game.State.Username) &&
+        string.IsNullOrEmpty(Game.State.UserId) &&
+        !_migrationDismissed && !_offlinePlay;
+
+    private bool CanRegister =>
+        QuestServerConfig.IsValidUsername(RegUsername) &&
+        QuestServerConfig.IsValidEmail(RegEmail);
+
+    private bool CanMigrate => QuestServerConfig.IsValidEmail(MigrationEmail);
+
+    private void SetAuthMode(string mode)
+    {
+        AuthMode = mode;
+        AuthMessage = null;
+        AuthOffline = false;
+    }
     private bool DemoRunning;
     private int DemoLiveLevelCount = 3;
 
@@ -404,86 +510,139 @@
         IsLoaded = true;
     }
 
-    private async Task SubmitUsernameAsync()
+    private async Task SubmitRegistrationAsync()
     {
-        var name = UsernameDraft.Trim();
-        if (string.IsNullOrWhiteSpace(name)) return;
+        if (!CanRegister || AuthBusy) return;
+        AuthBusy = true;
+        AuthMessage = null;
+        AuthOffline = false;
+        var result = await Accounts.RegisterAsync(RegUsername, RegEmail, Game.State);
+        AuthBusy = false;
+        if (result.Status == QuestAccountService.AccountStatus.Ok && result.Profile is not null)
+        {
+            await Game.PersistAsync();
+            Accounts.RecordEvent(result.Profile.UserId, "registered");
+            AuthSucceeded = true;
+            AuthMessage = $"Welcome, {result.Profile.Username}! Your progress now saves online.";
+            return;
+        }
+        ReportAccountError(result.Status, "create your account");
+    }
 
-        if (await TryEnterDemoModeAsync(name)) return;
+    private async Task SubmitLoginAsync()
+    {
+        if (string.IsNullOrWhiteSpace(LoginId) || AuthBusy) return;
+        AuthBusy = true;
+        AuthMessage = null;
+        AuthOffline = false;
+        // An email supplied alongside the login maps onto email-less
+        // accounts (pre-email players) or verifies the account's email.
+        var result = string.IsNullOrWhiteSpace(LoginEmail)
+            ? await Accounts.LoginAsync(LoginId)
+            : await Accounts.RestoreAsync(LoginId, LoginEmail);
+        AuthBusy = false;
+        if (result.Status == QuestAccountService.AccountStatus.Ok && result.Profile is not null)
+        {
+            await ActivateServerAccountAsync(result, "logged_in");
+            return;
+        }
+        ReportAccountError(result.Status, "find your account");
+    }
 
+    private async Task SubmitMigrationAsync()
+    {
+        if (!CanMigrate || AuthBusy || string.IsNullOrWhiteSpace(Game.State.Username)) return;
+        AuthBusy = true;
+        AuthMessage = null;
+        AuthOffline = false;
+        var result = await Accounts.MigrateExistingAsync(Game.State.Username, MigrationEmail, Game.State);
+        AuthBusy = false;
+        if (result.Status == QuestAccountService.AccountStatus.Ok && result.Profile is not null)
+        {
+            if (result.Progress is not null)
+                await Game.ApplyServerStateAsync(result.Progress);
+            else
+                await Game.PersistAsync();
+            Accounts.RecordEvent(result.Profile.UserId, "migrated");
+            AuthSucceeded = true;
+            AuthMessage = "Linked! Your progress now saves online and follows you to any device.";
+            _migrationDismissed = true;
+            return;
+        }
+        ReportAccountError(result.Status, "link your progress");
+    }
+
+    /// <summary>
+    /// Applies a server account to this device: server progress wins when
+    /// present, otherwise this device's progress is bound (and pushed) to
+    /// the account. Accounts flagged as demos in the database (created
+    /// manually, never advertised in the UI) additionally arm presentation
+    /// mode — the login itself looks identical to any other user.
+    /// </summary>
+    private async Task ActivateServerAccountAsync(QuestAccountService.AccountResult result, string eventName)
+    {
+        var profile = result.Profile!;
+        if (result.Progress is not null)
+            await Game.ApplyServerStateAsync(result.Progress);
+        else
+            await Game.BindServerProfileAsync(profile.UserId, profile.Username, profile.Email, profile.IsDemo);
+        if (profile.IsDemo)
+        {
+            DemoArmed = true;
+            DemoLiveLevelCount = 3;
+        }
+        Accounts.RecordEvent(profile.UserId, eventName);
+        AuthSucceeded = true;
+        AuthMessage = $"Welcome back, {profile.Username}! Your progress is loaded on this device.";
+    }
+
+    private void ReportAccountError(QuestAccountService.AccountStatus status, string action)
+    {
+        AuthSucceeded = false;
+        AuthOffline = status == QuestAccountService.AccountStatus.Offline;
+        AuthMessage = status switch
+        {
+            QuestAccountService.AccountStatus.UsernameTaken =>
+                "That username is already taken — log in as Returning if it's yours, or pick another.",
+            QuestAccountService.AccountStatus.EmailTaken =>
+                "That school email is already linked to an account — log in with it instead.",
+            QuestAccountService.AccountStatus.NotFound =>
+                "No account matches that — check the spelling, or register as a new student.",
+            QuestAccountService.AccountStatus.EmailMismatch =>
+                "That school email doesn't match this account — use the email you registered with.",
+            QuestAccountService.AccountStatus.InvalidInput =>
+                "Enter your username and a valid school email (name@school.edu).",
+            _ => $"Couldn't {action} right now (server unreachable). You can play offline and link later.",
+        };
+    }
+
+    /// <summary>
+    /// Server unreachable: keep the classic local-only session (username in
+    /// this browser only). The migration prompt reappears next visit so the
+    /// player can link up once the server is reachable.
+    /// </summary>
+    private async Task PlayOfflineAsync()
+    {
+        var name = AuthMode == "new" && QuestServerConfig.IsValidUsername(RegUsername)
+            ? RegUsername.Trim()
+            : LoginId.Trim();
+        if (!QuestServerConfig.IsValidUsername(name)) return;
         await Game.SetUsernameAsync(name);
+        _offlinePlay = true;
     }
 
-    // A presenter unlocks Demo Mode by typing a base64 string into the
-    // username box instead of a real name. The base64 check alone is a
-    // synchronous, near-zero-cost filter — an ordinary typed name essentially
-    // never happens to be valid base64 of length%4==0, so every real signup
-    // still submits instantly with no extra network round trip. Only a
-    // base64-shaped entry triggers one lookup for a matching static file
-    // under wwwroot/demo-unlock/ — the actual unlock phrase therefore never
-    // appears anywhere in the compiled app/WASM assemblies, only as a
-    // filename you choose when deploying.
-    private async Task<bool> TryEnterDemoModeAsync(string entered)
+    private async Task OnAuthKeyDown(KeyboardEventArgs e)
     {
-        if (!TryDecodeBase64(entered, out var decoded)) return false;
-
-        // Optional ":<n>" suffix picks how many levels play out live before
-        // the rest are prefilled — e.g. base64("showtime-quest:1") for a
-        // 30-second demo, base64("showtime-quest:3") for a fuller one. The
-        // count itself doesn't need to be secret, only the base phrase does
-        // — one flag file on the server covers every count.
-        var parts = decoded.Split(':', 2);
-        var codeBase = parts[0];
-        var liveLevels = parts.Length > 1 && int.TryParse(parts[1], out var n)
-            ? Math.Clamp(n, 1, Levels.Count)
-            : 3;
-
-        string displayName;
-        try
-        {
-            var response = await Http.GetAsync($"demo-unlock/{Uri.EscapeDataString(codeBase)}.flag");
-            if (!response.IsSuccessStatusCode) return false;
-            displayName = (await response.Content.ReadAsStringAsync()).Trim();
-        }
-        catch
-        {
-            return false;
-        }
-
-        await Game.ResetAsync();
-        UsernameDraft = "";
-        DemoArmed = true;
-        DemoLiveLevelCount = liveLevels;
-
-        // The flag file's own text (e.g. "Demo Class") becomes the display
-        // name shown in the header and on the certificate, instead of
-        // hardcoding one in source — an empty file just leaves the demo
-        // session anonymous, same as before.
-        if (!string.IsNullOrWhiteSpace(displayName))
-        {
-            await Game.SetUsernameAsync(displayName);
-        }
-
-        return true;
+        if (e.Key != "Enter") return;
+        if (AuthMode == "new") await SubmitRegistrationAsync();
+        else await SubmitLoginAsync();
     }
 
-    private static bool TryDecodeBase64(string input, out string decoded)
-    {
-        decoded = "";
-        if (input.Length < 8 || input.Length % 4 != 0) return false;
-
-        Span<byte> buffer = stackalloc byte[input.Length];
-        if (!Convert.TryFromBase64String(input, buffer, out var written)) return false;
-
-        decoded = System.Text.Encoding.UTF8.GetString(buffer[..written]);
-        return decoded.Length > 0 && decoded.All(c => !char.IsControl(c));
-    }
-
-    private async Task OnUsernameKeyDown(KeyboardEventArgs e)
+    private async Task OnMigrationKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Enter")
         {
-            await SubmitUsernameAsync();
+            await SubmitMigrationAsync();
         }
     }
 

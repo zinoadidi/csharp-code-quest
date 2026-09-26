@@ -8,13 +8,23 @@ namespace app.Services;
 /// Owns the player's persisted <see cref="GameState"/> (points, streak,
 /// per-task progress, unlocked achievements) and every rule for how it changes.
 /// Persisted to the browser's localStorage as one JSON blob — matches the
-/// original prototype's approach (see ../../REQUIREMENTS.md), no accounts/
-/// backend involved. Register as scoped/singleton in Program.cs and call
+/// original prototype's approach (see ../../REQUIREMENTS.md); the server
+/// account integration (<see cref="QuestAccountService"/>) syncs it online.
+/// Register as scoped/singleton in Program.cs and call
 /// <see cref="LoadAsync"/> once before first use.
 /// </summary>
-public sealed class GameStateService(IJSRuntime js)
+public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts)
 {
     private const string StorageKey = "csharpCodeQuestState";
+
+    // First-run marker for the server-integration version, stored separately
+    // from the save blob so it survives even if the save itself is replaced
+    // (e.g. by a server restore). "1" means this device already sent (or
+    // confirmed) the one-time progress backfill — see
+    // EnsureBacklogSyncedAsync. Absent for everyone upgrading to this
+    // version, so existing players backfill once and new players are simply
+    // marked going forward; existing UX is untouched either way.
+    private const string BacklogMarkerKey = "csharpCodeQuestBacklogV1";
 
     // A failed run doesn't zero the streak on the very first mistake — a
     // student gets this many failed attempts on a task, in a row, without an
@@ -30,6 +40,8 @@ public sealed class GameStateService(IJSRuntime js)
     public const int SolutionUnlockAttempts = 3;
 
     public GameState State { get; private set; } = new();
+
+    private bool _sessionReported;
 
     public async Task LoadAsync()
     {
@@ -56,6 +68,20 @@ public sealed class GameStateService(IJSRuntime js)
         // very first session was ever "identified," so every return visit
         // showed up as a separate, unlinked anonymous session in Clarity.
         await TagClaritySessionAsync();
+
+        // One server-side session event per app lifetime (scoped service),
+        // so Home + Stats both calling LoadAsync doesn't spam the log.
+        if (!_sessionReported && !string.IsNullOrEmpty(State.UserId))
+        {
+            _sessionReported = true;
+            accounts.RecordEvent(State.UserId, "session_started");
+        }
+
+        // First launch on this version: players whose progress predates the
+        // server integration get their standing backfilled to the server
+        // once (see EnsureBacklogSyncedAsync). A no-op for new players and
+        // for devices that already backfilled.
+        await EnsureBacklogSyncedAsync();
 
         // index.html's inline pre-boot script already applies the saved theme
         // before Blazor even starts (avoiding a flash of the wrong theme), so
@@ -134,6 +160,7 @@ public sealed class GameStateService(IJSRuntime js)
 
     private async Task SaveAsync()
     {
+        State.UpdatedAt = DateTime.UtcNow;
         try
         {
             var json = JsonSerializer.Serialize(State);
@@ -143,6 +170,25 @@ public sealed class GameStateService(IJSRuntime js)
         {
             // Same as above — persistence is best-effort.
         }
+        // Server sync is fire-and-forget and debounced inside
+        // QuestAccountService — a no-op until the player links an account,
+        // and never allowed to fail a local save.
+        accounts.PushProgress(State);
+    }
+
+    /// <summary>
+    /// Activates a server-fetched save on this device (login / server
+    /// restore / migration-adopt): replaces local state, persists it to
+    /// localStorage (which also re-pushes it to the server — harmless, same
+    /// bytes), and re-tags Clarity + theme for the new identity.
+    /// </summary>
+    public async Task ApplyServerStateAsync(GameState incoming)
+    {
+        State = incoming;
+        await SaveAsync();
+        await TagClaritySessionAsync();
+        await ApplyThemeAsync();
+        await EnsureBacklogSyncedAsync();
     }
 
     /// <summary>
@@ -158,6 +204,116 @@ public sealed class GameStateService(IJSRuntime js)
         State.Username = username;
         await SaveAsync();
         await TagClaritySessionAsync();
+    }
+
+    /// <summary>
+    /// Persists already-mutated state (used after the account service fills
+    /// in UserId/Email on this same instance) and re-tags the session.
+    /// </summary>
+    public async Task PersistAsync()
+    {
+        await SaveAsync();
+        await TagClaritySessionAsync();
+        await EnsureBacklogSyncedAsync();
+    }
+
+    /// <summary>
+    /// Sends the one-time progress backfill for this version, then records
+    /// the local marker so it never resends from this device. Safe to call
+    /// from every link/load path: it exits immediately when this device is
+    /// already marked, when no account is linked yet (an unlinked existing
+    /// player keeps their exact current UX — the migration prompt — and
+    /// backfills right after they link), or when the server is unreachable
+    /// (the marker stays unset, so the next launch retries). The server
+    /// itself also dedupes via the backlog marker event, so a second device
+    /// logging into the same account never duplicates the backfill.
+    /// </summary>
+    public async Task EnsureBacklogSyncedAsync()
+    {
+        if (string.IsNullOrEmpty(State.UserId)) return;
+        try
+        {
+            if (await js.InvokeAsync<string?>("localStorage.getItem", BacklogMarkerKey) == "1")
+                return;
+        }
+        catch
+        {
+            return; // No localStorage → can't mark; don't risk spamming.
+        }
+        var sent = await accounts.PushBacklogOnceAsync(State.UserId, BuildBacklog(State));
+        if (!sent) return;
+        try
+        {
+            await js.InvokeVoidAsync("localStorage.setItem", BacklogMarkerKey, "1");
+        }
+        catch
+        {
+            // Marker write failed — the server-side marker still dedupes.
+        }
+    }
+
+    /// <summary>
+    /// Computes the backfill payload from a local save: one summary event
+    /// (totals, achievements, streaks, start/finish stamps) plus one
+    /// per-level event for every level with completed tasks, so the server
+    /// log reflects where the player actually stands. Pure (no I/O) for
+    /// testability.
+    /// </summary>
+    public static IReadOnlyList<QuestAccountService.ServerEvent> BuildBacklog(GameState state)
+    {
+        var now = DateTime.UtcNow;
+        var completed = state.Tasks.Where(t => t.Value?.Completed == true).ToList();
+        var perLevel = completed
+            .Select(t => t.Key.Split('-', 2)[0])
+            .GroupBy(l => l)
+            .OrderBy(g => int.TryParse(g.Key, out var n) ? n : int.MaxValue)
+            .ToList();
+        var tags = new Dictionary<string, string>
+        {
+            ["tasksCompleted"] = completed.Count.ToString(),
+            ["levelsTouched"] = perLevel.Count.ToString(),
+            ["totalPoints"] = state.Points.ToString(),
+            ["maxStreak"] = state.MaxStreak.ToString(),
+            ["maxDayStreak"] = state.MaxDayStreak.ToString(),
+            ["daysPlayed"] = state.DaysPlayed.Count.ToString(),
+            ["quizzesPassed"] = state.PassedQuizzes.Count.ToString(),
+            ["achievements"] = string.Join(",", state.UnlockedAchievements.OrderBy(a => a)),
+            ["noHintCompletions"] = state.NoHintCompletions.ToString(),
+            ["startedAt"] = state.StartedAt?.ToString("o") ?? "",
+            ["completedAt"] = state.CompletedAt?.ToString("o") ?? "",
+            ["backlogVersion"] = "1",
+        };
+        var events = new List<QuestAccountService.ServerEvent>
+        {
+            new(QuestAccountService.BacklogMarker, now, tags),
+        };
+        events.AddRange(perLevel.Select(g =>
+            new QuestAccountService.ServerEvent(
+                "level_backlog",
+                now,
+                new Dictionary<string, string>
+                {
+                    ["level"] = g.Key,
+                    ["tasksCompleted"] = g.Count().ToString(),
+                })));
+        return events;
+    }
+
+    /// <summary>
+    /// Binds this device's save to a server account without replacing local
+    /// progress (login when the server has no progress doc yet): stamps the
+    /// identity fields, persists (which also pushes this progress up), and
+    /// re-tags the session.
+    /// </summary>
+    public async Task BindServerProfileAsync(string userId, string username, string? email, bool isDemo)
+    {
+        State.UserId = userId;
+        State.Username = username;
+        State.Email = email;
+        State.IsDemo = isDemo;
+        await SaveAsync();
+        await TagClaritySessionAsync();
+        await EnsureBacklogSyncedAsync();
     }
 
     public async Task SetSoundEnabledAsync(bool enabled)
@@ -247,6 +403,10 @@ public sealed class GameStateService(IJSRuntime js)
     /// </summary>
     private async Task TrackClarityEventAsync(string eventName, params (string Key, string Value)[] tags)
     {
+        // Same event goes to the player's server events doc (tied to their
+        // account, capped at 200 entries) — fire-and-forget, best-effort.
+        accounts.RecordEvent(State.UserId, eventName,
+            tags.ToDictionary(t => t.Key, t => t.Value));
         try
         {
             foreach (var (key, value) in tags)

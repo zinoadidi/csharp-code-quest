@@ -1,0 +1,366 @@
+@* Owner dashboard behind a database-backed sign-in (only demo-flagged
+   accounts created manually in the backend can open it). It reads the same
+   backend docs as the game (profiles, progress, events) for per-student
+   stats + ranking. Reachable at /admin; nothing in the game links to it. *@
+@page "/admin"
+@using System.Text.Json
+@using app.Services
+@inject QuestServerClient Store
+@inject QuestAccountService Accounts
+@inject QuestServerOptions Server
+@inject IJSRuntime JS
+
+<PageTitle>Quest Admin</PageTitle>
+
+@if (AuthedProfile is null)
+{
+    <div class="panel admin-panel">
+        <h2>Quest admin</h2>
+        <p class="stats-section-hint">Owner sign-in — enter the admin account's username (verified against the database).</p>
+        <div class="username-actions">
+            <input class="username-input" @bind="AdminId" @bind:event="oninput"
+                   @onkeydown="OnAdminKeyDown" maxlength="254"
+                   placeholder="Admin username" />
+            <button class="btn-primary" disabled="@(string.IsNullOrWhiteSpace(AdminId) || Busy)" @onclick="SubmitAdminLoginAsync">
+                @(Busy ? "Verifying…" : "Sign in →")
+            </button>
+        </div>
+        @if (AuthMessage is not null)
+        {
+            <div class="stats-inline-note error">@AuthMessage</div>
+        }
+    </div>
+}
+else
+{
+<div class="panel admin-panel">
+    <h2>Quest admin</h2>
+    <p class="stats-section-hint">@Server.BaseUrl · @Server.AppId · signed in as @AuthedProfile.Username (<button class="admin-linkbtn" @onclick="LogoutAsync">sign out</button>)</p>
+    <div class="username-actions">
+        <input class="username-input" @bind="LookupId" @bind:event="oninput"
+               @onkeydown="OnLookupKeyDown" maxlength="254"
+               placeholder="Look up username or school email" />
+        <button class="btn-secondary" disabled="@(string.IsNullOrWhiteSpace(LookupId) || Busy)" @onclick="LookupAsync">
+            Look up
+        </button>
+        <button class="btn-primary" disabled="@Busy" @onclick="RefreshAsync">
+            @(Busy ? "Loading…" : "Refresh all")
+        </button>
+    </div>
+    @if (Message is not null)
+    {
+        <div class="stats-inline-note @(Succeeded ? "success" : "error")">@Message</div>
+    }
+    @if (Rows.Count > 0)
+    {
+        <p class="stats-section-hint">@Rows.Count account(s), ranked by points.</p>
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Student</th>
+                    <th>Email</th>
+                    <th>Points</th>
+                    <th>Tasks</th>
+                    <th>Levels</th>
+                    <th>Achieve.</th>
+                    <th>Days</th>
+                    <th>Done</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var (row, i) in Rows.Select((r, i) => (r, i)))
+                {
+                    <tr class="@(row.IsDemo ? "admin-demo" : "")">
+                        <td>@(i + 1)</td>
+                        <td class="admin-name">@row.Username</td>
+                        <td>@(row.Email ?? "—")</td>
+                        <td class="admin-num">@row.Points</td>
+                        <td class="admin-num">@row.TasksCompleted</td>
+                        <td class="admin-num">@row.LevelsTouched</td>
+                        <td class="admin-num">@row.Achievements</td>
+                        <td class="admin-num">@row.DaysPlayed</td>
+                        <td>@(row.Completed ? "yes" : "—")</td>
+                        <td><button class="btn-secondary btn-small" @onclick="() => ToggleEventsAsync(row)">Events</button></td>
+                    </tr>
+                    @if (OpenUserId == row.UserId)
+                    {
+                        <tr>
+                            <td colspan="10">
+                                @if (row.Events is null)
+                                {
+                                    <span class="stats-section-hint">Loading events…</span>
+                                }
+                                else if (row.Events.Count == 0)
+                                {
+                                    <span class="stats-section-hint">No events yet.</span>
+                                }
+                                else
+                                {
+                                    <ul class="admin-events">
+                                        @foreach (var e in row.Events)
+                                        {
+                                            <li>
+                                                <span class="admin-event-name">@e.Name</span>
+                                                <span class="stats-section-hint">@e.At.ToLocalTime().ToString("g")</span>
+                                                @if (e.Tags is not null)
+                                                {
+                                                    foreach (var kv in e.Tags)
+                                                    {
+                                                        <span class="stats-section-hint">@kv.Key=@kv.Value</span>
+                                                    }
+                                                }
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    }
+</div>
+}
+
+<style>
+    .admin-panel { max-width: 1000px; margin: 1.5rem auto; }
+    .admin-linkbtn { background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; font-size: inherit; color: inherit; }
+    .admin-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
+    .admin-table th, .admin-table td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid rgba(128, 128, 128, 0.25); }
+    .admin-table th { font-weight: 600; }
+    .admin-num { text-align: right; font-variant-numeric: tabular-nums; }
+    .admin-name { font-weight: 600; }
+    tr.admin-demo td { opacity: 0.75; }
+    .admin-events { list-style: none; margin: 0.25rem 0; padding: 0; font-size: 0.85rem; }
+    .admin-events li { padding: 0.2rem 0; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+    .admin-event-name { font-weight: 600; }
+</style>
+
+@code {
+    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+
+    private sealed class Row
+    {
+        public string UserId = "";
+        public string Username = "";
+        public string? Email;
+        public bool IsDemo;
+        public int Points;
+        public int TasksCompleted;
+        public int LevelsTouched;
+        public int Achievements;
+        public int DaysPlayed;
+        public bool Completed;
+        public List<QuestAccountService.ServerEvent>? Events;
+    }
+
+    private const string AdminSessionKey = "questAdminUser";
+
+    private List<Row> Rows = new();
+    private string LookupId = "";
+    private string? OpenUserId;
+    private string? Message;
+    private bool Succeeded;
+    private bool Busy;
+
+    // DB-backed gate: only a manually-created demo-flagged account (the
+    // owner knows which) can open the dashboard. Verified server-side on
+    // every sign-in; the username persists in this tab's sessionStorage.
+    private QuestAccountService.ServerProfile? AuthedProfile;
+    private string AdminId = "";
+    private string? AuthMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var saved = await JS.InvokeAsync<string?>("sessionStorage.getItem", AdminSessionKey);
+            if (!string.IsNullOrWhiteSpace(saved))
+            {
+                AdminId = saved;
+                await SubmitAdminLoginAsync();
+                return;
+            }
+        }
+        catch
+        {
+            // No session storage — just show the sign-in form.
+        }
+    }
+
+    private async Task SubmitAdminLoginAsync()
+    {
+        var id = AdminId.Trim();
+        if (id.Length == 0 || Busy) return;
+        Busy = true;
+        AuthMessage = null;
+        try
+        {
+            var result = await Accounts.LoginAsync(id);
+            if (result.Status == QuestAccountService.AccountStatus.Ok &&
+                result.Profile is not null && result.Profile.IsDemo)
+            {
+                AuthedProfile = result.Profile;
+                try
+                {
+                    await JS.InvokeVoidAsync("sessionStorage.setItem", AdminSessionKey, result.Profile.Username);
+                }
+                catch
+                {
+                    // Session persistence is a nicety; the sign-in stands.
+                }
+                await RefreshAsync();
+                return;
+            }
+            AuthMessage = result.Status == QuestAccountService.AccountStatus.Offline
+                ? "Couldn't reach the server right now — try again."
+                : "That account isn't authorized for the admin view.";
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task LogoutAsync()
+    {
+        AuthedProfile = null;
+        Rows = new();
+        try
+        {
+            await JS.InvokeVoidAsync("sessionStorage.removeItem", AdminSessionKey);
+        }
+        catch
+        {
+            // Best-effort.
+        }
+    }
+
+    private async Task OnAdminKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SubmitAdminLoginAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (Busy) return;
+        Busy = true;
+        Message = null;
+        try
+        {
+            var docs = await Store.ListDocsAsync();
+            var profiles = new Dictionary<string, QuestAccountService.ServerProfile>();
+            var progresses = new Dictionary<string, GameState>();
+            foreach (var item in docs)
+            {
+                try
+                {
+                    if (item.Id.StartsWith("profile:", StringComparison.Ordinal))
+                    {
+                        var p = JsonSerializer.Deserialize<QuestAccountService.ServerProfile>(
+                            item.Doc.GetRawText(), JsonOpts);
+                        if (p is not null && !string.IsNullOrEmpty(p.UserId))
+                            profiles[p.UserId] = p;
+                    }
+                    else if (item.Id.StartsWith("progress:", StringComparison.Ordinal))
+                    {
+                        var raw = item.Doc.TryGetProperty("state", out var st)
+                            ? st.GetRawText() : item.Doc.GetRawText();
+                        var g = JsonSerializer.Deserialize<GameState>(raw, JsonOpts);
+                        if (g is not null && !string.IsNullOrEmpty(g.UserId))
+                            progresses[g.UserId] = g;
+                    }
+                }
+                catch
+                {
+                    // One corrupt doc must not sink the whole dashboard.
+                }
+            }
+            if (profiles.Count == 0 && progresses.Count == 0)
+            {
+                Succeeded = false;
+                Message = "No accounts found — is the backend reachable?";
+            }
+            else
+            {
+                Rows = profiles.Values
+                    .Select(p => ToRow(p, progresses.GetValueOrDefault(p.UserId)))
+                    .OrderByDescending(r => r.Points)
+                    .ToList();
+            }
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task LookupAsync()
+    {
+        var id = LookupId.Trim();
+        if (id.Length == 0 || Busy) return;
+        Busy = true;
+        Message = null;
+        try
+        {
+            // Read-only account fetch (same path as the game's login screen).
+            var result = await Accounts.LoginAsync(id);
+            if (result.Status != QuestAccountService.AccountStatus.Ok || result.Profile is null)
+            {
+                Succeeded = false;
+                Message = result.Status == QuestAccountService.AccountStatus.Offline
+                    ? "Couldn't reach the server right now."
+                    : $"No account matches “{id}”.";
+                return;
+            }
+            var row = ToRow(result.Profile, result.Progress);
+            Rows.RemoveAll(r => r.UserId == row.UserId);
+            Rows.Add(row);
+            Rows = Rows.OrderByDescending(r => r.Points).ToList();
+            Succeeded = true;
+            Message = $"Loaded {row.Username}.";
+        }
+        finally
+        {
+            Busy = false;
+        }
+    }
+
+    private async Task ToggleEventsAsync(Row row)
+    {
+        if (OpenUserId == row.UserId)
+        {
+            OpenUserId = null;
+            return;
+        }
+        OpenUserId = row.UserId;
+        if (row.Events is null)
+            row.Events = (await Accounts.GetRecentEventsAsync(row.UserId, 25)).ToList();
+    }
+
+    private async Task OnLookupKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await LookupAsync();
+    }
+
+    private static Row ToRow(QuestAccountService.ServerProfile p, GameState? g) => new()
+    {
+        UserId = p.UserId,
+        Username = p.Username,
+        Email = p.Email,
+        IsDemo = p.IsDemo,
+        Points = g?.Points ?? 0,
+        TasksCompleted = g?.Tasks.Values.Count(t => t?.Completed == true) ?? 0,
+        LevelsTouched = g is null ? 0 : g.Tasks
+            .Where(t => t.Value?.Completed == true)
+            .Select(t => t.Key.Split('-', 2)[0])
+            .Distinct()
+            .Count(),
+        Achievements = g?.UnlockedAchievements.Count ?? 0,
+        DaysPlayed = g?.DaysPlayed.Count ?? 0,
+        Completed = g?.CompletedAt is not null,
+    };
+}

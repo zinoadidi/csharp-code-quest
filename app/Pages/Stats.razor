@@ -2,6 +2,7 @@
 @using app.Content
 @using app.Services
 @inject GameStateService Game
+@inject QuestAccountService Accounts
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -176,14 +177,47 @@ else
         </section>
 
         <section class="stats-section">
+            <h2>Account</h2>
+            <p class="stats-section-hint">
+                @if (!string.IsNullOrEmpty(Game.State.UserId))
+                {
+                    <text>Signed in as <strong>@Game.State.Username</strong>@(string.IsNullOrEmpty(Game.State.Email) ? "" : $" · {Game.State.Email}"). Progress syncs online, so it follows you to any device.</text>
+                }
+                else
+                {
+                    <text>This device isn't linked yet — your progress lives only in this browser. Link it from the home page so it follows you to any device.</text>
+                }
+            </p>
+        </section>
+
+        <section class="stats-section">
             <h2>Backup &amp; Restore</h2>
             <p class="stats-section-hint">
-                Progress lives only in this browser — there's no account or server behind it.
-                To bring it to another device (or back after clearing your browser), export a
-                code here and import it there.
+                Your progress saves to your online account — enter the same username
+                (or school email) on another device to pull it there. If your account
+                doesn't have a school email yet, enter it below and it will be mapped
+                to your account.
             </p>
 
             <div class="stats-backup-grid">
+                <div class="stats-backup-card">
+                    <h3>Restore from account</h3>
+                    <p>Pull the progress for a username or school email onto this device.</p>
+                    <input class="username-input stats-username-confirm" placeholder="Username or school email"
+                           @bind="ServerRestoreId" @bind:event="oninput" />
+                    <input class="username-input stats-username-confirm" placeholder="School email (needed if the account lacks one)"
+                           @bind="ServerRestoreEmail" @bind:event="oninput" />
+                    <button class="btn-primary"
+                            disabled="@(string.IsNullOrWhiteSpace(ServerRestoreId) || ServerRestoreBusy)"
+                            @onclick="RestoreFromServerAsync">
+                        @(ServerRestoreBusy ? "Restoring…" : "Restore Progress")
+                    </button>
+                    @if (ServerRestoreMessage is not null)
+                    {
+                        <div class="stats-inline-note @(ServerRestoreSucceeded ? "success" : "error")">@ServerRestoreMessage</div>
+                    }
+                </div>
+
                 <div class="stats-backup-card">
                     <h3>Export</h3>
                     <p>Generates a code for your current progress. Copy it somewhere safe.</p>
@@ -203,8 +237,8 @@ else
                 </div>
 
                 <div class="stats-backup-card">
-                    <h3>Restore</h3>
-                    <p>Paste a code exported from another device, and confirm the username it belongs to.</p>
+                    <h3>Restore from code (offline)</h3>
+                    <p>No connection? Paste a code exported from another device, and confirm the username it belongs to.</p>
                     <textarea class="stats-token-box stats-token-input" placeholder="Paste your code here"
                               @bind="ImportToken" @bind:event="oninput"></textarea>
                     <input class="username-input stats-username-confirm" placeholder="Username on that code"
@@ -258,6 +292,11 @@ else
     private string ImportUsername = "";
     private string? ImportMessage;
     private bool ImportSucceeded;
+    private string ServerRestoreId = "";
+    private string ServerRestoreEmail = "";
+    private string? ServerRestoreMessage;
+    private bool ServerRestoreSucceeded;
+    private bool ServerRestoreBusy;
     private bool ConfirmingReset;
     private bool IsCheckingForUpdate;
 
@@ -335,6 +374,44 @@ else
             GameStateService.ImportResult.Success => "Restored! Your progress from that code is now active here.",
             GameStateService.ImportResult.UsernameMismatch => "That username doesn't match the code — double check both and try again.",
             _ => "That code doesn't look valid — make sure you copied the whole thing.",
+        };
+    }
+
+    /// <summary>
+    /// Server restore: pulls the account matching the username or school
+    /// email onto this device. A supplied school email is mapped onto
+    /// email-less accounts, or must match the account's email otherwise.
+    /// </summary>
+    private async Task RestoreFromServerAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ServerRestoreId) || ServerRestoreBusy) return;
+        ServerRestoreBusy = true;
+        ServerRestoreMessage = null;
+        var result = await Accounts.RestoreAsync(ServerRestoreId, ServerRestoreEmail);
+        ServerRestoreBusy = false;
+        ServerRestoreSucceeded = result.Status == QuestAccountService.AccountStatus.Ok;
+        if (ServerRestoreSucceeded && result.Profile is not null)
+        {
+            if (result.Progress is not null)
+                await Game.ApplyServerStateAsync(result.Progress);
+            else
+                await Game.BindServerProfileAsync(
+                    result.Profile.UserId, result.Profile.Username, result.Profile.Email, result.Profile.IsDemo);
+            Accounts.RecordEvent(result.Profile.UserId, "restored");
+            ServerRestoreMessage = $"Restored! {result.Profile.Username}'s progress is now active here.";
+            return;
+        }
+        ServerRestoreMessage = result.Status switch
+        {
+            QuestAccountService.AccountStatus.NotFound =>
+                "No account matches that — check the spelling, or register on the home page.",
+            QuestAccountService.AccountStatus.EmailMismatch =>
+                "That school email doesn't match this account — use the email you registered with.",
+            QuestAccountService.AccountStatus.EmailTaken =>
+                "That school email belongs to a different account — use that account's username instead.",
+            QuestAccountService.AccountStatus.InvalidInput =>
+                "Enter your username or school email — plus your school email if the account doesn't have one yet.",
+            _ => "Couldn't reach the server right now — try again, or use the offline code below.",
         };
     }
 

@@ -21,13 +21,30 @@ public sealed class TaskProgress
 /// </summary>
 public sealed class GameState
 {
-    // Asked once at first launch (see Home.razor's username prompt) purely so
+    // Asked once at first launch (see Home.razor's username prompt) so
     // Microsoft Clarity session recordings/tags can be identified by name in
-    // the Clarity dashboard — see GameStateService.SetUsernameAsync. This is
-    // NOT an account system; there's no backend, so nothing round-trips this
-    // value anywhere except this browser's own localStorage and Clarity's own
-    // (write-only, from this app's side) session tagging.
+    // the Clarity dashboard — see GameStateService.SetUsernameAsync. Since
+    // the server integration this doubles as the account's display name and
+    // round-trips to the player's server profile/progress docs.
     public string? Username { get; set; }
+
+    // Server account binding (see QuestAccountService). Null for saves that
+    // predate the server integration — those players link up via the
+    // migration prompt (Home.razor) without losing local progress.
+    public string? UserId { get; set; }
+
+    // Student's school email, collected at registration and used as the
+    // second login/restore identifier alongside the username. Null for
+    // demo-class accounts and pre-email saves until mapped on restore.
+    public string? Email { get; set; }
+
+    // Demo-class sessions are server profiles flagged in the database (see
+    // QuestServerConfig) — this just exempts them from the school-email rule.
+    public bool IsDemo { get; set; }
+
+    // Client-side last-write stamp, refreshed on every SaveAsync — the
+    // server progress doc carries its own copy for last-write-wins sync.
+    public DateTime UpdatedAt { get; set; }
 
     // Whether task/level/achievement sound effects play (see wwwroot/js/sfx.js
     // and GameStateService.PlaySoundAsync). Persisted so muting sticks across
