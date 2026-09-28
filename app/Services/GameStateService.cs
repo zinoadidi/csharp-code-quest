@@ -40,6 +40,16 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
     // earlier, softer hint tiers stay freely available the whole time.
     public const int SolutionUnlockAttempts = 3;
 
+    // Skip economy: at most this many tasks per level may ever be skipped, the
+    // wallet never holds more than MaxSkipWallet skips (started full, and
+    // refilled +1 per SkipStreakDays-day streak), and skipping is always
+    // spend-first — a skip is never refunded, even if the task is solved
+    // later, so caps can't be farmed by skip → solve → skip again.
+    public const int MaxSkipsPerLevel = 2;
+    public const int MaxSkipWallet = 7;
+    public const int StartingSkips = 7;
+    public const int SkipStreakDays = 3;
+
     public GameState State { get; private set; } = new();
 
     private bool _sessionReported;
@@ -532,6 +542,35 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
     public bool IsTaskCompleted(int levelId, int taskId) =>
         State.Tasks.TryGetValue(GameState.TaskKey(levelId, taskId), out var p) && p.Completed;
 
+    public bool IsTaskSkipped(int levelId, int taskId) =>
+        State.Tasks.TryGetValue(GameState.TaskKey(levelId, taskId), out var p) && p.Skipped;
+
+    /// <summary>
+    /// How many tasks in this level were ever skipped (including ones solved
+    /// afterwards — <see cref="TaskProgress.Skipped"/> is permanent history,
+    /// so the per-level cap counts spending, not current state).
+    /// </summary>
+    public int SkipsUsedInLevel(int levelId) =>
+        State.Tasks.Count(t =>
+            t.Key.Split('-', 2)[0] == levelId.ToString() && t.Value?.Skipped == true);
+
+    public int SkipsUsedTotal => State.Tasks.Values.Count(t => t?.Skipped == true);
+
+    /// <summary>
+    /// Why this task can't be skipped right now, or null when skipping is
+    /// allowed. Completed tasks need no skip; otherwise the wallet and the
+    /// per-level cap gate it.
+    /// </summary>
+    public string? SkipBlockedReason(int levelId, GameTask task)
+    {
+        if (IsTaskCompleted(levelId, task.Id)) return "Already solved — no need to skip!";
+        if (State.SkipsAvailable <= 0)
+            return "No skips left — solve tasks on 3 days in a row to earn one back!";
+        if (SkipsUsedInLevel(levelId) >= MaxSkipsPerLevel)
+            return $"Max {MaxSkipsPerLevel} skips per level — solve this one to move on!";
+        return null;
+    }
+
     public int HintsRevealedFor(int levelId, int taskId) =>
         State.Tasks.TryGetValue(GameState.TaskKey(levelId, taskId), out var p) ? p.HintsRevealed : 0;
 
@@ -645,7 +684,7 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
     public Task RecordSolutionCopiedAsync(int levelId, int taskId) =>
         TrackClarityEventAsync("solution_copied", ("level", levelId.ToString()), ("task", taskId.ToString()));
 
-    public sealed record AttemptResult(bool Passed, int PointsAwarded, int Streak, IReadOnlyList<Achievement> NewAchievements, bool LevelCompleted, bool QuestCompleted);
+    public sealed record AttemptResult(bool Passed, int PointsAwarded, int Streak, IReadOnlyList<Achievement> NewAchievements, bool LevelCompleted, bool QuestCompleted, bool SkipEarned);
 
     /// <summary>
     /// Records the outcome of one Run click against a task. Points/streak only
@@ -666,6 +705,7 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
 
         var pointsAwarded = 0;
         var newlyCompleted = passed && !progress.Completed;
+        var skipEarned = false;
 
         if (passed)
         {
@@ -701,12 +741,17 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
         if (newlyCompleted)
         {
             RecordDayPlayed();
+            skipEarned = CheckSkipStreakReward();
         }
 
         var newAchievements = CheckNewAchievements(levels);
         var levelJustCompleted = newlyCompleted && level is not null && !wasLevelComplete && IsLevelComplete(level);
         var questJustCompleted = levelJustCompleted && CheckQuestCompletion(levels);
         await SaveAsync();
+        if (skipEarned)
+        {
+            await TrackClarityEventAsync("skip_earned", ("day_streak", State.CurrentDayStreak.ToString()), ("skips_available", State.SkipsAvailable.ToString()));
+        }
         if (newlyCompleted)
         {
             await TrackClarityEventAsync("task_completed", ("level", levelId.ToString()), ("task", task.Id.ToString()));
@@ -721,7 +766,62 @@ public sealed class GameStateService(IJSRuntime js, QuestAccountService accounts
             }
         }
         await ReportProgressToClarityAsync();
-        return new AttemptResult(passed, pointsAwarded, State.Streak, newAchievements, levelJustCompleted, questJustCompleted);
+        return new AttemptResult(passed, pointsAwarded, State.Streak, newAchievements, levelJustCompleted, questJustCompleted, skipEarned);
+    }
+
+    public sealed record SkipResult(bool Skipped, int SkipsLeft, IReadOnlyList<Achievement> NewAchievements);
+
+    /// <summary>
+    /// Skips a task: spends one skip from the wallet and moves on WITHOUT
+    /// completing anything. Awards no points, touches no streak, completes no
+    /// level — <see cref="IsLevelComplete"/> still requires every task solved,
+    /// so skipped tasks (and anything they gate, like the next level) only
+    /// unlock once the player returns and genuinely solves them. Skipped tasks
+    /// stay revisit-able: they remain the level's first-incomplete resume
+    /// target and reachable via Previous/Next navigation.
+    /// </summary>
+    public async Task<SkipResult> SkipTaskAsync(int levelId, GameTask task, IReadOnlyList<Level> levels)
+    {
+        if (SkipBlockedReason(levelId, task) is not null)
+        {
+            return new SkipResult(false, State.SkipsAvailable, []);
+        }
+
+        var key = GameState.TaskKey(levelId, task.Id);
+        if (!State.Tasks.TryGetValue(key, out var progress))
+        {
+            progress = new TaskProgress();
+            State.Tasks[key] = progress;
+        }
+
+        progress.Skipped = true;
+        State.SkipsAvailable = Math.Max(0, State.SkipsAvailable - 1);
+
+        var newAchievements = CheckNewAchievements(levels);
+        await SaveAsync();
+        await TrackClarityEventAsync("task_skipped",
+            ("level", levelId.ToString()), ("task", task.Id.ToString()), ("skips_left", State.SkipsAvailable.ToString()));
+        await ReportProgressToClarityAsync();
+        return new SkipResult(true, State.SkipsAvailable, newAchievements);
+    }
+
+    /// <summary>
+    /// Awards +1 skip (capped at <see cref="MaxSkipWallet"/>) every time the
+    /// day streak hits another multiple of <see cref="SkipStreakDays"/> —
+    /// solve on 3 days straight, get a skip back. Fires at most once per
+    /// milestone (see <see cref="GameState.LastSkipAwardDayStreak"/>) and the
+    /// milestone is consumed even when the wallet is already full.
+    /// </summary>
+    private bool CheckSkipStreakReward()
+    {
+        if (State.CurrentDayStreak < SkipStreakDays) return false;
+        if (State.CurrentDayStreak % SkipStreakDays != 0) return false;
+        if (State.LastSkipAwardDayStreak >= State.CurrentDayStreak) return false;
+        State.LastSkipAwardDayStreak = State.CurrentDayStreak;
+        if (State.SkipsAvailable >= MaxSkipWallet) return false;
+        State.SkipsAvailable++;
+        State.SkipsEarnedFromStreaks++;
+        return true;
     }
 
     /// <summary>

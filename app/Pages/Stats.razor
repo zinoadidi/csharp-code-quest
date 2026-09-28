@@ -74,6 +74,14 @@ else
                 <div class="stats-card-value">@QuizzesPassed/@TotalQuizzes</div>
                 <div class="stats-card-label">Quizzes Passed</div>
             </div>
+            <div class="stats-card" title="Skips let you move past a hard task and come back later. Max @GameStateService.MaxSkipsPerLevel per level — earn more with a @(GameStateService.SkipStreakDays)-day streak!">
+                <div class="stats-card-value">⏭ @Game.State.SkipsAvailable</div>
+                <div class="stats-card-label">Skips Available</div>
+            </div>
+            <div class="stats-card">
+                <div class="stats-card-value">@Game.SkipsUsedTotal</div>
+                <div class="stats-card-label">Skips Used (@Game.State.SkipsEarnedFromStreaks earned from streaks)</div>
+            </div>
         </div>
 
         <section class="stats-section">
@@ -112,6 +120,7 @@ else
                     var pct = total == 0 ? 0 : (int)Math.Round(100.0 * completed / total);
                     var quizzesTotal = level.QuizStagesOrEmpty.Count;
                     var quizzesDone = level.QuizStagesOrEmpty.Count(q => Game.IsQuizPassed(level.Id, q.AfterTaskId));
+                    var skipped = Game.SkipsUsedInLevel(level.Id);
                     var isCurrent = level.Id == CurrentLevelId;
 
                     <div class="stats-level-row @(isCurrent ? "current" : "")">
@@ -133,7 +142,7 @@ else
                         <div class="stats-level-bar-track">
                             <div class="stats-level-bar-fill" style="width: @(pct)%"></div>
                         </div>
-                        <div class="stats-level-numbers">@completed/@total tasks @(quizzesTotal > 0 ? $"· {quizzesDone}/{quizzesTotal} quizzes" : "")</div>
+                        <div class="stats-level-numbers">@completed/@total tasks @(quizzesTotal > 0 ? $"· {quizzesDone}/{quizzesTotal} quizzes" : "")@(skipped > 0 ? $" · ⏭{skipped} skipped" : "")</div>
                     </div>
                 }
             </div>

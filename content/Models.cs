@@ -146,3 +146,27 @@ public static class OutputChecks
     public static bool LinesEqual(string output, params string[] expectedLines) =>
         Lines(output).SequenceEqual(expectedLines);
 }
+
+/// <summary>
+/// Shared helpers for writing <see cref="GameTask.CheckSource"/> predicates.
+/// Source checks must be tolerant of harmless formatting differences (e.g.
+/// `catch(DivideByZeroException)` vs `catch (DivideByZeroException ex)`), so
+/// they match on regexes over whitespace-normalized patterns rather than
+/// exact <c>string.Contains</c> substrings with baked-in spacing.
+/// </summary>
+public static class SourceChecks
+{
+    /// <summary>
+    /// True when <paramref name="source"/> contains a catch clause for
+    /// <paramref name="exceptionType"/> (e.g. "DivideByZeroException"),
+    /// regardless of spacing or whether the exception is captured into a
+    /// variable. Also requires a `try` keyword so a lone comment mentioning
+    /// the exception name is not enough.
+    /// </summary>
+    public static bool Catches(string source, string exceptionType) =>
+        source.Contains("try") &&
+        System.Text.RegularExpressions.Regex.IsMatch(
+            source,
+            @"catch\s*\(\s*" + System.Text.RegularExpressions.Regex.Escape(exceptionType) + @"\b",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+}

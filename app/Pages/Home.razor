@@ -131,6 +131,10 @@
                 <div class="stat-label">Streak</div>
                 <div class="stat-value">@Game.State.Streak <img class="stat-icon streak-flame" src="icons/flame.svg" alt="" /></div>
             </div>
+            <div class="stat" title="Skips let you move past a hard task and come back later. Max @GameStateService.MaxSkipsPerLevel per level, wallet holds max @GameStateService.MaxSkipWallet — earn more with a @(GameStateService.SkipStreakDays)-day streak!">
+                <div class="stat-label">Skips</div>
+                <div class="stat-value skip-balance" @key="Game.State.SkipsAvailable">⏭ @Game.State.SkipsAvailable</div>
+            </div>
             <button class="btn-secondary sound-toggle" @onclick="Game.ToggleSoundAsync" title="@(Game.State.SoundEnabled ? "Mute sound effects" : "Unmute sound effects")">
                 @(Game.State.SoundEnabled ? "🔊" : "🔇")
             </button>
@@ -159,6 +163,7 @@
                     var locked = Game.IsLevelLocked(Levels, i);
                     var completed = Game.IsLevelComplete(level);
                     var doneCount = level.Tasks.Count(t => Game.IsTaskCompleted(level.Id, t.Id));
+                    var skippedCount = level.Tasks.Count(t => !Game.IsTaskCompleted(level.Id, t.Id) && Game.IsTaskSkipped(level.Id, t.Id));
                     var isActive = CurrentLevelId == level.Id;
 
                     <button class="level-btn @(isActive ? "active" : "") @(completed ? "completed" : "") @(locked ? "locked" : "")"
@@ -176,7 +181,7 @@
                                 <img class="inline-icon" src="icons/lock.svg" alt="Locked" />
                             }
                         </div>
-                        <div class="level-progress">@doneCount/@level.Tasks.Count tasks</div>
+                        <div class="level-progress">@doneCount/@level.Tasks.Count tasks@(skippedCount > 0 ? $" · ⏭{skippedCount} skipped" : "")</div>
                     </button>
                 }
             </div>
@@ -283,6 +288,10 @@
                             <span>Level @CurrentLevelId &bull; Task @CurrentTaskId</span>
                             <span class="task-difficulty-badge">Difficulty: @task.Difficulty</span>
                             <span class="task-points"><img class="inline-icon" src="icons/gem.svg" alt="" /> +@task.Points points</span>
+                            @if (CurrentLevelId is int badgeLevel && !Game.IsTaskCompleted(badgeLevel, task.Id) && Game.IsTaskSkipped(badgeLevel, task.Id))
+                            {
+                                <span class="task-skipped-badge" title="You skipped this task — solve it to earn the points and fully complete the level.">⏭ Skipped — solve to earn +@task.Points</span>
+                            }
                         </div>
                     </div>
 
@@ -347,6 +356,18 @@
                     <div class="controls">
                         <button class="btn-primary" disabled="@IsRunning" @onclick="RunAsync">@(IsRunning ? "Running..." : "▶ Run Code")</button>
                         <button class="btn-secondary" @onclick="ResetCode">↻ Reset</button>
+                        @if (CurrentLevelId is int skipLevel && !Game.IsTaskCompleted(skipLevel, task.Id))
+                        {
+                            var skipReason = Game.SkipBlockedReason(skipLevel, task);
+                            @if (skipReason is null)
+                            {
+                                <button class="btn-skip" disabled="@IsRunning" @onclick="SkipTaskAsync" title="Skip this task for now (uses 1 skip) — no points, and you can come back anytime to solve it properly.">⏭ Skip (@Game.State.SkipsAvailable left)</button>
+                            }
+                            else
+                            {
+                                <button class="btn-skip btn-skip-locked" disabled title="@skipReason">⏭ Skip (@Game.State.SkipsAvailable left)</button>
+                            }
+                        }
                         @if (RevealedHints.Count < task.Hints.Count)
                         {
                             var solutionLocked = Game.IsNextHintLockedSolution(CurrentLevelId!.Value, task);
@@ -367,6 +388,10 @@
                             <button class="btn-next" @onclick="NextTask">Next Task →</button>
                         }
                     </div>
+                    @if (CurrentLevelId is int noteLevel && !Game.IsTaskCompleted(noteLevel, task.Id) && Game.SkipBlockedReason(noteLevel, task) is { } noteReason)
+                    {
+                        <div class="skip-limit-note">@noteReason</div>
+                    }
 
                     <div class="task-navigation">
                         @if (CurrentTaskId > 1)
@@ -419,6 +444,21 @@
             @for (var i = 0; i < CelebrationFxPieceCount; i++)
             {
                 <span class="fx-piece" style="--i:@i"></span>
+            }
+        </div>
+    }
+
+    @* Skip power-up moment: a bold toast plus a burst of ⏭ pieces flying
+       across the screen (pure CSS, same cheap pattern as celebration-fx).
+       Shows on every skip AND on streak-earned refills, and always states
+       the wallet balance so remaining skips stay visible. *@
+    @if (_skipToast is not null)
+    {
+        <div class="skip-toast" @key="_skipToastToken">@_skipToast</div>
+        <div class="skip-fx" @key="_skipToastToken" aria-hidden="true">
+            @for (var i = 0; i < SkipFxPieceCount; i++)
+            {
+                <span class="skip-fx-piece" style="--i:@i">⏭</span>
             }
         </div>
     }
@@ -810,6 +850,11 @@
 
         EnqueueAchievements(attempt.NewAchievements);
 
+        if (attempt.SkipEarned)
+        {
+            _ = ShowSkipToastAsync($"🔥 {GameStateService.SkipStreakDays}-day streak! +1 skip earned — wallet: {Game.State.SkipsAvailable}/{GameStateService.MaxSkipWallet} ⏭");
+        }
+
         if (attempt.QuestCompleted)
         {
             EnqueueQuestComplete();
@@ -917,6 +962,73 @@
             ActiveCelebrationEffect = null;
             StateHasChanged();
         }
+    }
+
+    // Skip power-up toast + fly-burst (see the skip-toast/skip-fx markup
+    // above): one token per showing so a streak-earned refill landing right
+    // after a skip can't clear the other's toast early — same pattern as the
+    // celebration fx token.
+    private const int SkipFxPieceCount = 14;
+    private string? _skipToast;
+    private int _skipToastToken;
+
+    private async Task ShowSkipToastAsync(string text)
+    {
+        var token = ++_skipToastToken;
+        _skipToast = text;
+        StateHasChanged();
+        await Task.Delay(2600);
+        if (_skipToastToken == token)
+        {
+            _skipToast = null;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Spends one skip to move past the current task unsolved: no points, no
+    /// streak change, level stays incomplete until the player returns and
+    /// solves it (see GameStateService.SkipTaskAsync). Advances like NextTask
+    /// — including any gating quiz — but never into the next level (it would
+    /// still be locked, since skipping can't complete a level): skipping the
+    /// last task lands back on the level overview instead.
+    /// </summary>
+    private async Task SkipTaskAsync()
+    {
+        var level = CurrentLevel;
+        var task = CurrentTask;
+        if (level is null || task is null || CurrentLevelId is not int levelId || IsRunning) return;
+
+        var result = await Game.SkipTaskAsync(levelId, task, Levels);
+        if (!result.Skipped) return;
+
+        EnqueueAchievements(result.NewAchievements);
+        await Game.PlaySoundAsync(SoundEffect.Navigate);
+        _ = ShowSkipToastAsync($"⏭ Skipped! {result.SkipsLeft} skip{(result.SkipsLeft == 1 ? "" : "s")} left — come back anytime to earn the points.");
+
+        var pendingQuiz = Game.PendingQuizAfter(level, task.Id);
+        if (pendingQuiz is not null)
+        {
+            ActiveQuiz = pendingQuiz;
+            _afterQuiz = () => AdvancePastSkippedTask(level, task.Id);
+            return;
+        }
+
+        AdvancePastSkippedTask(level, task.Id);
+    }
+
+    private void AdvancePastSkippedTask(Level level, int skippedTaskId)
+    {
+        var tasksSorted = level.Tasks.OrderBy(t => t.Id).ToList();
+        var index = tasksSorted.FindIndex(t => t.Id == skippedTaskId);
+        if (index >= 0 && index + 1 < tasksSorted.Count)
+        {
+            CurrentTaskId = tasksSorted[index + 1].Id;
+            LoadTaskIntoEditor();
+            return;
+        }
+
+        CurrentLevelId = null;
     }
 
     private void EnqueueAchievements(IEnumerable<Achievement> achievements)

@@ -6,12 +6,19 @@ public sealed class TaskProgress
     public int HintsRevealed { get; set; }
     public bool UsedSolutionHint { get; set; }
 
+    // Ever skipped via the Skip button (see GameStateService.SkipTaskAsync).
+    // Stays true even if the task is solved later — it is the permanent record
+    // of skip spending, so per-level/total skip caps can't be farmed by
+    // skip → solve → skip again. Never implies completion on its own.
+
     // Failed Run Code attempts on THIS task specifically — separate from
     // GameState.ConsecutiveFailures (which only tracks streak-breaking across
     // the whole session). Used to gate the final, solution-revealing hint tier
     // behind actually having tried, per player feedback that showing the exact
     // answer on demand (with no attempt required) defeated the point of hints.
     public int FailedAttempts { get; set; }
+
+    public bool Skipped { get; set; }
 }
 
 /// <summary>
@@ -101,6 +108,23 @@ public sealed class GameState
 
     public int CurrentDayStreak { get; set; }
     public int MaxDayStreak { get; set; }
+
+    // Skip wallet (see GameStateService for the economy rules: 2 skips max per
+    // level, wallet capped at 7, +1 earned per 3-day streak). Defaults to a
+    // full wallet: System.Text.Json leaves missing properties untouched, so
+    // saves from before this feature existed deserialize straight to 7 with
+    // no migration step, while a wallet deliberately spent to 0 round-trips
+    // as an explicit 0.
+    public int SkipsAvailable { get; set; } = 7;
+
+    // Cumulative skips earned back via day-streak rewards (spent skips are
+    // derived from Tasks[*].Skipped, so only earnings need a counter).
+    public int SkipsEarnedFromStreaks { get; set; }
+
+    // The CurrentDayStreak value at which the last streak-skip was awarded —
+    // guards the 3-day milestone so it fires exactly once per milestone even
+    // if several tasks complete on the same day.
+    public int LastSkipAwardDayStreak { get; set; }
 
     // Set once, the first time Pages/Certificate.razor is viewed after
     // CompletedAt is set — lets that page play a one-time entrance

@@ -498,7 +498,7 @@ public static class Level12_Capstone
                 },
                 Kind: TaskKind.MiniGame,
                 CheckOutput: output => output.Trim() == "Cleared 4 rooms with 5 HP remaining and 3 items collected.",
-                CheckSource: source => source.Contains("interface IMonster12b") && source.Contains("catch (InvalidOperationException") && source.Contains("Canvas.MoveTo") && source.Contains("Dictionary<string, int>")
+                CheckSource: source => source.Contains("interface IMonster12b") && SourceChecks.Catches(source, "InvalidOperationException") && source.Contains("Canvas.MoveTo") && source.Contains("Dictionary<string, int>")
             )
         },
         QuizStages: new List<QuizStage>

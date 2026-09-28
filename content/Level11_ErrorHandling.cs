@@ -44,17 +44,30 @@ public static class Level11_ErrorHandling
             new(
                 Id: 2,
                 Title: "Read the Message",
-                Description: "Try dividing 10 by 0 and printing the result. Catch DivideByZeroException as ex, printing \"Error: <ex.Message>\".",
+                Description: "Using int variables x = 10 and y = 0 (not the literal 10 / 0, which C# rejects at compile time with CS0020), try dividing x by y and printing the result. Catch DivideByZeroException as ex, printing \"Error: <ex.Message>\". The exact runtime wording of ex.Message may vary, so any message mentioning divide-by-zero counts.",
                 Difficulty: Difficulty.Medium,
                 Points: 20,
                 StarterCode: "try\n{\n    int x = 10;\n    int y = 0;\n    Console.WriteLine(x / y);\n}\ncatch (DivideByZeroException ex)\n{\n    // print $\"Error: {ex.Message}\"\n}\n",
-                Example: "try\n{\n    int x = 10;\n    int y = 0;\n    Console.WriteLine(x / y);\n}\ncatch (DivideByZeroException ex)\n{\n    Console.WriteLine($\"Error: {ex.Message}\");\n}\n// Output: Error: Attempted to divide by zero.",
+                Example: "try\n{\n    int x = 10;\n    int y = 0;\n    Console.WriteLine(x / y);\n}\ncatch (DivideByZeroException ex)\n{\n    Console.WriteLine($\"Error: {ex.Message}\");\n}\n// Output (exact wording may vary by runtime): Error: Attempted to divide by zero.",
                 Hints: new List<HintTier>
                 {
-                    new("`catch (ExceptionType ex)` captures the exception object itself — `ex.Message` holds a human-readable description of what went wrong."),
+                    new("`catch (ExceptionType ex)` captures the exception object itself — `ex.Message` holds a human-readable description of what went wrong. NOTE: never write the literal `10 / 0` — the C# compiler rejects constant division by zero (CS0020) before your try/catch can ever run. Variables x and y dodge that."),
                     new("try\n{\n    int x = 10;\n    int y = 0;\n    Console.WriteLine(x / y);\n}\ncatch (DivideByZeroException ex)\n{\n    Console.WriteLine($\"Error: {ex.Message}\");\n}", IsSolution: true)
                 },
-                CheckOutput: output => output.Trim() == "Error: Attempted to divide by zero."
+                CheckOutput: output =>
+                {
+                    // The runtime's own DivideByZeroException wording is not
+                    // part of the contract (it varies by runtime version and
+                    // locale), so accept any "Error:" line describing a
+                    // divide/division-by-zero, ignoring case, spacing and
+                    // hyphens. Genuine handling (not a hardcoded print) is
+                    // enforced separately by CheckSource below.
+                    var trimmed = output.Trim();
+                    if (!trimmed.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)) return false;
+                    var normalized = new string(trimmed.Where(char.IsLetter).ToArray()).ToLowerInvariant();
+                    return normalized.Contains("dividebyzero") || normalized.Contains("divisionbyzero");
+                },
+                CheckSource: source => SourceChecks.Catches(source, "DivideByZeroException")
             ),
             new(
                 Id: 4,
@@ -284,7 +297,7 @@ public static class Level11_ErrorHandling
                 },
                 Kind: TaskKind.MiniGame,
                 CheckOutput: output => output.Trim() == "Succeeded: 1, Failed: 1",
-                CheckSource: source => source.Contains("Canvas.MoveBy") && source.Contains("catch (InvalidOperationException") && source.Contains("class Robot11")
+                CheckSource: source => source.Contains("Canvas.MoveBy") && SourceChecks.Catches(source, "InvalidOperationException") && source.Contains("class Robot11")
             ),
             new(
                 Id: 3,
@@ -304,7 +317,7 @@ public static class Level11_ErrorHandling
                 },
                 Kind: TaskKind.MiniGame,
                 CheckOutput: output => output.Trim() == "Crash avoided!",
-                CheckSource: source => source.Contains("Canvas.AddShape") && source.Contains("catch (DivideByZeroException")
+                CheckSource: source => source.Contains("Canvas.AddShape") && SourceChecks.Catches(source, "DivideByZeroException")
             )
         },
         QuizStages: new List<QuizStage>
