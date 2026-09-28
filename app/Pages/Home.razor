@@ -430,7 +430,7 @@
     <div class="achievement-stack">
         @foreach (var achievement in VisibleAchievements)
         {
-            <div class="celebration-popup achievement-popup" @key="achievement">
+            <div class="celebration-popup achievement-popup" @key="@($"achievement-{achievement.Id}")">
                 <div class="achievement-icon">@achievement.Icon</div>
                 <div class="achievement-text">@achievement.Title</div>
                 <div class="achievement-desc">@achievement.Description</div>
@@ -440,7 +440,7 @@
 
     @if (ActiveCelebrationEffect is not null)
     {
-        <div class="celebration-fx celebration-fx-@ActiveCelebrationEffect" @key="_celebrationTriggerCount">
+        <div class="celebration-fx celebration-fx-@ActiveCelebrationEffect" @key="@($"celebration-{_celebrationTriggerCount}")">
             @for (var i = 0; i < CelebrationFxPieceCount; i++)
             {
                 <span class="fx-piece" style="--i:@i"></span>
@@ -454,8 +454,8 @@
        the wallet balance so remaining skips stay visible. *@
     @if (_skipToast is not null)
     {
-        <div class="skip-toast" @key="_skipToastToken">@_skipToast</div>
-        <div class="skip-fx" @key="_skipToastToken" aria-hidden="true">
+        <div class="skip-toast" @key="@($"skip-toast-{_skipToastToken}")">@_skipToast</div>
+        <div class="skip-fx" @key="@($"skip-fx-{_skipToastToken}")" aria-hidden="true">
             @for (var i = 0; i < SkipFxPieceCount; i++)
             {
                 <span class="skip-fx-piece" style="--i:@i">⏭</span>
