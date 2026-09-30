@@ -20,7 +20,7 @@ public static class QuestServerConfig
     // published bundle can still recover it.
     private const string EndpointKey = "quest-endpoint-key-v1";
 
-    public const string EncryptedDefaultBaseUrl = "GQERAwcXSkEAFQMAHB1CHhZUXgJQAwYNGgQAAQcXAxoIChEDBQILQh0cFwcAFlpJABhLFwoHCwZECEgaXwNV";
+    public const string EncryptedDefaultBaseUrl = "GQERAwcXSkEDFQEMHB1ORgYLWBIfEBIXFhFMBwIBFAoaCwZZRgdLThdQF0NdXRpCFxkFCQoIHQADCh8MXxNSHhsREh1DABwFAB8aQB1CRAIcQxNDGBZIEAZYAQ==";
 
     /// <summary>Plaintext backend URL (decrypted on first access).</summary>
     public static string DefaultBaseUrl => DecryptBaseUrl(EncryptedDefaultBaseUrl) ?? "";
